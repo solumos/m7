@@ -49,13 +49,15 @@ contract AcquireSeed is Script {
         returns (uint256[7] memory need, uint256[7] memory maxIn, uint256 budget)
     {
         Valuation valuation = IndexController(vault.controller()).valuation();
-        uint256 usdcPrice = _price(valuation, 7);
+        // Rehearsals on a quiet fork may relax this; a real acquisition runs in market hours with fresh feeds.
+        uint256 maxAge = vm.envOr("MAX_FEED_AGE", valuation.maxAge());
+        uint256 usdcPrice = _price(valuation, 7, maxAge);
         for (uint256 i; i < 7; ++i) {
             uint256 held = vault.assets(i).balanceOf(deployer);
             if (held >= amounts[i]) continue;
             need[i] = amounts[i] - held;
             maxIn[i] = Math.mulDiv(
-                need[i] * _price(valuation, i),
+                need[i] * _price(valuation, i, maxAge),
                 valuation.tokenUnits(7) * (BPS + MAX_PREMIUM_BPS),
                 valuation.tokenUnits(i) * usdcPrice * BPS,
                 Math.Rounding.Ceil
@@ -92,10 +94,10 @@ contract AcquireSeed is Script {
     }
 
     /// @dev 1e18-scaled USD price of one whole token from the valuation's own feed, refusing stale answers.
-    function _price(Valuation valuation, uint256 index) private view returns (uint256) {
+    function _price(Valuation valuation, uint256 index, uint256 maxAge) private view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = valuation.feeds(index).latestRoundData();
         require(
-            answer > 0 && updatedAt <= block.timestamp && block.timestamp - updatedAt <= valuation.maxAge(),
+            answer > 0 && updatedAt <= block.timestamp && block.timestamp - updatedAt <= maxAge,
             "stale or invalid feed"
         );
         return Math.mulDiv(uint256(answer), 1e18, valuation.feedUnits(index));

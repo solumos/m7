@@ -83,14 +83,14 @@ def build_seed(snapshot, prices, usd, vault, receiver, block):
     }
 
 
-def read_prices(rpc, manifest):
+def read_prices(rpc, manifest, max_age):
     now = int(rpc.block['timestamp'], 16)
     prices = []
     for asset in manifest['stocks'] + [manifest['usdc']]:
         values = rpc.call(asset['feed'], 'latestRoundData()')
         if len(values) != 5 or not 0 < values[1] < 2**255 or not 0 < values[3] <= now:
             raise ValueError('Invalid feed round for ' + asset.get('symbol', 'USDC'))
-        if now - values[3] > manifest['risk_checks']['max_stock_feed_age_seconds']:
+        if now - values[3] > max_age:
             raise ValueError('Feed older than the valuation max age: ' + asset.get('symbol', 'USDC'))
         prices.append(Fraction(values[1], 10**asset['feed_decimals']))
     # Express stock prices in USDC so the target is a USDC budget.
@@ -117,6 +117,8 @@ def main():
     parser.add_argument('--out', type=Path, default=ROOT / 'config/seed.json')
     parser.add_argument('--manifest', type=Path, default=ROOT / 'config/base.json')
     parser.add_argument('--rpc', default=os.environ.get('BASE_RPC_URL', 'https://base-rpc.publicnode.com'))
+    parser.add_argument('--max-feed-age', type=int, help='Oldest usable feed answer in seconds; defaults to the '
+                        'valuation max age. Only rehearsals on a quiet fork should raise it')
     args = parser.parse_args()
     try:
         manifest = json.loads(args.manifest.read_text())
@@ -125,7 +127,8 @@ def main():
         check_vault(rpc, manifest, vault)
         block = {'number': int(rpc.block['number'], 16),
                  'timestamp': datetime.fromtimestamp(int(rpc.block['timestamp'], 16), timezone.utc).isoformat()}
-        seed = build_seed(json.loads(args.snapshot.read_text()), read_prices(rpc, manifest), args.usd,
+        max_age = args.max_feed_age or manifest['risk_checks']['max_stock_feed_age_seconds']
+        seed = build_seed(json.loads(args.snapshot.read_text()), read_prices(rpc, manifest, max_age), args.usd,
                           vault, args.receiver, block)
     except Exception as exc:
         print(json.dumps({'error': str(exc)}, indent=2))
