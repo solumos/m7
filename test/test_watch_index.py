@@ -4,7 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from index_snapshot import SYMBOLS
-from watch_index import IDENTIFIER, compare_snapshot, decode_assertion, decode_proposal, monitor, ratios
+from watch_index import (IDENTIFIER, compare_snapshot, decode_assertion, decode_proposal, exit_status, monitor,
+                         quarter_end, ratios)
 
 
 RATIOS = [10**18 // 7] * 7
@@ -149,6 +150,38 @@ class WatchIndexTest(unittest.TestCase):
         report = monitor(CONTROLLER, FakeRPC(), expected)
         self.assertFalse(report['snapshot_comparison']['quarter_matches'])
 
+
+    def test_alert_levels_separate_expected_states_from_emergencies(self):
+        report = monitor(CONTROLLER, FakeRPC(), snapshot())  # our own matching proposal, window open
+        self.assertEqual({a['level'] for a in report['alert_levels']}, {'info'})
+        self.assertEqual(exit_status(report, 'any'), 1)
+        self.assertEqual(exit_status(report, 'action'), 0)
+        self.assertEqual(exit_status(report, 'critical'), 0)
+        unknown = monitor(CONTROLLER, FakeRPC())  # someone's proposal and no reviewed snapshot yet
+        self.assertIn({'level': 'critical', 'message': 'No independently compiled expected snapshot supplied; '
+                       'asserted ratios require review.'}, unknown['alert_levels'])
+        self.assertEqual(exit_status(unknown, 'critical'), 1)
+        disputed = monitor(CONTROLLER, FakeRPC(assertion=assertion_words(disputed=True), replaceable=True), snapshot())
+        self.assertEqual(exit_status(disputed, 'critical'), 1)
+        accepted = monitor(CONTROLLER, FakeRPC(status=2, assertion=assertion_words(True, True)), snapshot())
+        self.assertEqual(exit_status(accepted, 'action'), 1)
+        self.assertEqual(exit_status(accepted, 'critical'), 0)
+
+    def test_quarter_deadline_turns_critical(self):
+        self.assertEqual(quarter_end(QUARTER), 1798761600)  # 2027-01-01 00:00 UTC
+        self.assertEqual(quarter_end(2026 * 4 + 2), 1790812800)  # 2026-10-01 00:00 UTC
+        late = FakeRPC(identifier=0)
+        late.block = dict(late.block, timestamp=hex(1798761600 - 20 * 86400))
+        report = monitor(CONTROLLER, late)
+        self.assertIn('Quarter ends in 20 days without an executed rebalance.', report['alerts'])
+        self.assertEqual(exit_status(report, 'critical'), 1)
+        self.assertEqual(exit_status(monitor(CONTROLLER, FakeRPC(identifier=0)), 'critical'), 0)
+
+    def test_snapshot_without_scale_is_named(self):
+        expected = snapshot()
+        del expected['scale']
+        with self.assertRaisesRegex(ValueError, 'no scale'):
+            compare_snapshot(expected, decode_proposal(proposal_words()), QUARTER)
 
 if __name__ == '__main__':
     unittest.main()

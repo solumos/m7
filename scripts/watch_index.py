@@ -12,9 +12,21 @@ from verify_base import RPC, address, bytes32_text
 
 
 STATUS = ('none', 'pending', 'accepted', 'rejected', 'executed')
+# critical: a human must look now; action: an operator step is due; info: an expected state.
+LEVELS = ('info', 'action', 'critical')
+DEADLINE_DAYS = 21
 ZERO_ID = '0x' + '00' * 32
 IDENTIFIER = bytes32_text('ASSERT_TRUTH2')
 LIVENESS = 72 * 3600
+
+
+def quarter_end(quarter):
+    """UTC timestamp at which proposal quarter `quarter` (year * 4 + zero-based quarter) ends."""
+    year, index = divmod(quarter, 4)
+    month = index * 3 + 4
+    if month > 12:
+        year, month = year + 1, 1
+    return int(datetime(year, month, 1, tzinfo=timezone.utc).timestamp())
 
 
 def uint(value, bits=256):
@@ -90,6 +102,8 @@ def assertion_mismatches(assertion, controller, currency, bond_floor):
 def compare_snapshot(expected, proposal, quarter):
     if expected.get('symbols') != list(SYMBOLS):
         raise ValueError('Expected snapshot has incorrect canonical symbol order')
+    if expected.get('scale') is None:
+        raise ValueError('Expected snapshot has no scale; supply index_snapshot.py output')
     if uint(expected.get('scale')) != 10**18:
         raise ValueError('Expected snapshot uses an unsupported ratio scale')
     expected_ratios = ratios(expected.get('quantity_ratios'))
@@ -130,16 +144,24 @@ def monitor(controller, rpc, expected=None):
         'assertion_id': identifier, 'accepted_assertion_id': accepted,
         'new_proposal_allowed': replaceable, 'uma_oracle': oracle,
         # Harmless since the vault and gateway accept the router's refund; reported for visibility only.
-        'router_eth_wei': rpc.balance(router), 'alerts': [],
+        'router_eth_wei': rpc.balance(router), 'alerts': [], 'alert_levels': [],
+        'quarter_ends_at': datetime.fromtimestamp(quarter_end(quarter), timezone.utc).isoformat(),
         'source_truth': 'Not verified. Independently review filings, corporate actions, prices, and methodology.',
         'evidence': 'Inspect controller Proposed and UMA AssertionMade events. No evidence URL is fetched.',
         'transactions_sent': False,
     }
-    alerts = report['alerts']
+
+    def alert(level, message):
+        report['alerts'].append(message)
+        report['alert_levels'].append({'level': level, 'message': message})
+
+    days_left = (quarter_end(quarter) - now) // 86400
     if last != quarter:
-        alerts.append('Current calendar quarter has no completed rebalance.')
+        alert('info', 'Current calendar quarter has no completed rebalance.')
+        if days_left <= DEADLINE_DAYS:
+            alert('critical', 'Quarter ends in %d days without an executed rebalance.' % days_left)
     if identifier == ZERO_ID:
-        alerts.append('No current-quarter assertion exists; a sourced proposal is required.')
+        alert('action', 'No current-quarter assertion exists; a sourced proposal is required.')
         return report
     proposal = decode_proposal(rpc.call(controller, 'proposal(bytes32)', identifier))
     assertion = decode_assertion(rpc.call(oracle, 'getAssertion(bytes32)', identifier))
@@ -149,46 +171,55 @@ def monitor(controller, rpc, expected=None):
     assertion['challenge_expires_utc'] = datetime.fromtimestamp(
         assertion['challenge_expires_at'], timezone.utc).isoformat()
     if proposal['quarter_id'] != quarter:
-        alerts.append('Controller current-quarter mapping points to a different proposal quarter.')
+        alert('critical', 'Controller current-quarter mapping points to a different proposal quarter.')
     mismatches = assertion_mismatches(assertion, controller, currency, bond_floor)
     if mismatches:
-        alerts.append('UNEXPECTED UMA ASSERTION PARAMETERS: ' + ', '.join(mismatches))
+        alert('critical', 'UNEXPECTED UMA ASSERTION PARAMETERS: ' + ', '.join(mismatches))
+    challenge_open = (proposal['status'] == 'pending' and not assertion['disputed']
+                      and assertion['challenge_expires_at'] > now)
     if expected is None:
-        alerts.append('No independently compiled expected snapshot supplied; asserted ratios require review.')
+        alert('critical' if challenge_open else 'action',
+              'No independently compiled expected snapshot supplied; asserted ratios require review.')
     else:
         comparison = compare_snapshot(expected, proposal, quarter)
         report['snapshot_comparison'] = comparison
         if not comparison['quarter_matches']:
-            alerts.append('Expected snapshot is not for this proposal and current quarter.')
+            alert('critical', 'Expected snapshot is not for this proposal and current quarter.')
         if not comparison['ratios_match']:
-            alerts.append('ASSERTED RATIOS DIFFER FROM EXPECTED SNAPSHOT; independently review before challenge expiry.')
+            alert('critical', 'ASSERTED RATIOS DIFFER FROM EXPECTED SNAPSHOT; independently review before challenge expiry.')
         if not comparison['digest_matches']:
-            alerts.append('ASSERTED OBSERVATION DIGEST DIFFERS FROM EXPECTED SNAPSHOT.')
+            alert('critical', 'ASSERTED OBSERVATION DIGEST DIFFERS FROM EXPECTED SNAPSHOT.')
     status = proposal['status']
     if status == 'pending':
         payee = assertion['disputer'] if assertion['disputed'] else assertion['asserter']
         if uint(rpc.call(currency, 'isBlacklisted(address)', int(payee, 16))[0], 8):
-            alerts.append('UNSETTLEABLE ASSERTION: the bond currency refuses payment to ' + payee
-                          + '; it never blocks the quarter, so submit a replacement proposal if needed.')
+            alert('critical', 'UNSETTLEABLE ASSERTION: the bond currency refuses payment to ' + payee
+                  + '; it never blocks the quarter, so submit a replacement proposal if needed.')
         if assertion['settled']:
-            alerts.append('UMA settled externally; controller.settle still needs to record the result.')
+            alert('action', 'UMA settled externally; controller.settle still needs to record the result.')
         elif assertion['disputed']:
-            alerts.append('UMA assertion is disputed; it does not block a replacement proposal.')
+            alert('critical', 'UMA assertion is disputed; it does not block a replacement proposal.')
         elif assertion['challenge_expires_at'] <= now:
-            alerts.append('Undisputed challenge window closed; settlement is available.')
+            alert('action', 'Undisputed challenge window closed; settlement is available.')
         else:
-            alerts.append('Challenge window is open; independently verify the assertion before expiry.')
+            alert('info', 'Challenge window is open; independently verify the assertion before expiry.')
     elif status == 'rejected':
-        alerts.append('Assertion was rejected; a corrected bonded proposal may be submitted this quarter.')
+        alert('action', 'Assertion was rejected; a corrected bonded proposal may be submitted this quarter.')
     elif status == 'accepted':
-        alerts.append('Accepted assertion awaits permissionless execution within the valuation safety gates.')
+        alert('action', 'Accepted assertion awaits permissionless execution within the valuation safety gates.')
     if replaceable and accepted == ZERO_ID and status == 'pending':
-        alerts.append('A replacement proposal is currently allowed for this quarter.')
+        alert('info', 'A replacement proposal is currently allowed for this quarter.')
     if status in ('accepted', 'executed') and not (assertion['settled'] and assertion['settlement_result']):
-        alerts.append('INCONSISTENT STATE: accepted proposal lacks a settled truthful UMA assertion.')
+        alert('critical', 'INCONSISTENT STATE: accepted proposal lacks a settled truthful UMA assertion.')
     if status == 'executed' and last != quarter:
-        alerts.append('INCONSISTENT STATE: executed proposal is absent from lastExecutedQuarter.')
+        alert('critical', 'INCONSISTENT STATE: executed proposal is absent from lastExecutedQuarter.')
     return report
+
+
+def exit_status(report, fail_on='any'):
+    """1 when an alert at or above `fail_on` is open, else 0."""
+    floor = 0 if fail_on == 'any' else LEVELS.index(fail_on)
+    return 1 if any(LEVELS.index(a['level']) >= floor for a in report['alert_levels']) else 0
 
 
 def main():
@@ -198,6 +229,8 @@ def main():
                         help='Base JSON-RPC endpoint; defaults to BASE_RPC_URL')
     parser.add_argument('--expected-snapshot', type=Path,
                         help='Local independently compiled index_snapshot.py JSON output; never fetched remotely')
+    parser.add_argument('--fail-on', choices=LEVELS + ('any',), default='any',
+                        help='Lowest alert level that makes the exit status 1 (default any alert)')
     args = parser.parse_args()
     try:
         if not args.rpc_url:
@@ -205,7 +238,7 @@ def main():
         expected = json.loads(args.expected_snapshot.read_text()) if args.expected_snapshot else None
         report = monitor(args.controller, RPC(args.rpc_url), expected)
         print(json.dumps(report, indent=2))
-        return 1 if report['alerts'] else 0
+        return exit_status(report, args.fail_on)
     except Exception as exc:
         print(json.dumps({'read_checks_passed': False, 'transactions_sent': False,
                           'error': str(exc), 'action': 'Independent review required; monitor could not establish state.'}, indent=2))

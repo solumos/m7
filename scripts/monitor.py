@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Scheduled M7CAP monitor for an always-on server. Read-only: no keys, signatures, or transactions.
+
+Each run (every 15 minutes from ops/m7cap-monitor.timer) reads the controller's proposal state with
+watch_index.py and, at most hourly, runs the verify_base.py read checks with the vault and gateway as policy
+accounts. New or changed alerts at or above NOTIFY_LEVEL go to ALERT_WEBHOOK_URL (Slack or Discord JSON). Open
+critical alerts repeat every six hours and cleared ones are announced. HEARTBEAT_URL is pinged after every run
+that read the chain and delivered its alerts, so a heartbeat service notices a dead monitor, server or RPC.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import time
+import urllib.request
+
+from verify_base import RPC, address, verify
+from watch_index import LEVELS, monitor
+
+ROOT = Path(__file__).resolve().parents[1]
+REPEAT_CRITICAL_SECONDS = 6 * 3600
+PREFLIGHT_INTERVAL_SECONDS = 3600
+
+
+def alert_key(alert):
+    return hashlib.sha256((alert['level'] + '|' + alert['message']).encode()).hexdigest()[:16]
+
+
+def plan_notifications(alerts, state, now, notify_level='action'):
+    """Messages to send and the next state. An alert at or above `notify_level` is sent when it first appears;
+    an open critical alert repeats every REPEAT_CRITICAL_SECONDS; a sent alert that clears is announced."""
+    floor = LEVELS.index(notify_level)
+    previous = state.get('open', {})
+    current, messages = {}, []
+    for alert in alerts:
+        key = alert_key(alert)
+        entry = previous.get(key, {'level': alert['level'], 'message': alert['message'],
+                                   'first_seen': now, 'last_sent': None})
+        due = entry['last_sent'] is None or (
+            alert['level'] == 'critical' and now - entry['last_sent'] >= REPEAT_CRITICAL_SECONDS)
+        if LEVELS.index(alert['level']) >= floor and due:
+            messages.append('[M7CAP %s] %s' % (alert['level'].upper(), alert['message']))
+            entry = dict(entry, last_sent=now)
+        current[key] = entry
+    for key, entry in previous.items():
+        if key not in current and entry.get('last_sent') is not None:
+            messages.append('[M7CAP RESOLVED] ' + entry['message'])
+    return messages, dict(state, open=current)
+
+
+def request(url, payload=None):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json',
+                                                           'User-Agent': 'm7cap-monitor/0.1'})
+    with urllib.request.urlopen(req, timeout=30) as response:
+        response.read()
+
+
+def collect(args, state, now):
+    """Current alerts, and whether the chain could be read."""
+    alerts, readable = [], True
+    try:
+        rpc = RPC(args.rpc)
+        expected = json.loads(Path(args.expected_snapshot).read_text()) if args.expected_snapshot else None
+        alerts += monitor(args.controller, rpc, expected)['alert_levels']
+        vault = args.vault or address(rpc.call(args.controller, 'vault()')[0])
+    except Exception as exc:
+        readable, vault = False, args.vault
+        alerts.append({'level': 'critical', 'message': 'Watcher could not read the controller: %s' % exc})
+    if now - state.get('last_preflight', 0) >= PREFLIGHT_INTERVAL_SECONDS:
+        accounts = [a for a in (vault, args.gateway) if a]
+        try:
+            verify(json.loads(Path(args.manifest).read_text()), args.rpc, accounts=accounts)
+            state['preflight_error'] = None
+        except Exception as exc:
+            state['preflight_error'] = str(exc)
+        state['last_preflight'] = now
+    if state.get('preflight_error'):
+        alerts.append({'level': 'critical', 'message': 'Preflight read checks failed: ' + state['preflight_error']})
+    return alerts, readable
+
+
+def main():
+    env = os.environ.get
+    state_dir = env('STATE_DIRECTORY')  # set by systemd's StateDirectory=
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--controller', default=env('CONTROLLER'))
+    p.add_argument('--vault', default=env('VAULT'), help='Defaults to controller.vault()')
+    p.add_argument('--gateway', default=env('GATEWAY'))
+    p.add_argument('--rpc', default=env('BASE_RPC_URL'))
+    p.add_argument('--expected-snapshot', default=env('EXPECTED_SNAPSHOT'),
+                   help='The reviewed index_snapshot.py output for the current quarter')
+    p.add_argument('--manifest', default=str(ROOT / 'config/base.json'))
+    p.add_argument('--webhook', default=env('ALERT_WEBHOOK_URL'))
+    p.add_argument('--heartbeat', default=env('HEARTBEAT_URL'))
+    p.add_argument('--notify-level', choices=LEVELS, default=env('NOTIFY_LEVEL', 'action'))
+    p.add_argument('--state-file', default=env('STATE_FILE') or str(
+        Path(state_dir) / 'state.json' if state_dir else Path.home() / '.m7cap-monitor/state.json'))
+    args = p.parse_args()
+    if not args.controller or not args.rpc:
+        p.error('CONTROLLER and BASE_RPC_URL are required')
+
+    now = int(time.time())
+    state_file = Path(args.state_file)
+    state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    alerts, readable = collect(args, state, now)
+    messages, state = plan_notifications(alerts, state, now, args.notify_level)
+    delivered = True
+    for message in messages:
+        if not args.webhook:
+            print(message)
+            continue
+        try:
+            request(args.webhook, {'text': message, 'content': message})  # Slack reads text, Discord content
+        except Exception as exc:
+            delivered = False
+            print('Alert delivery failed: %s' % exc, file=sys.stderr)
+    if delivered:
+        # Undelivered alerts stay unsent, so the next run retries them.
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(state, indent=2) + '\n')
+    if readable and delivered and args.heartbeat:
+        try:
+            request(args.heartbeat)
+        except Exception as exc:
+            print('Heartbeat failed: %s' % exc, file=sys.stderr)
+    print(json.dumps({'time': now, 'readable': readable, 'alerts': alerts, 'sent': messages if delivered else []},
+                     indent=2))
+    if not readable or not delivered:
+        return 2
+    return 1 if any(a['level'] == 'critical' for a in alerts) else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

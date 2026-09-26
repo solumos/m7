@@ -43,6 +43,10 @@ send() {
     { cat "$WORK/logs/send.log"; fail "cast send $* (a fork source without recent history fails here)"; }
 }
 
+monitor_ok() { # readable, and no critical alert except the quarter deadline (real near a quarter end)
+  sed -n '/^{/,$p' "$1" | python3 -c 'import json, sys; d = json.load(sys.stdin); sys.exit(not d["readable"] or any(
+    a["level"] == "critical" and not a["message"].startswith("Quarter ends in") for a in d["alerts"]))'
+}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/m7cap-rehearsal.XXXXXX")
 mkdir -p "$WORK/logs"
 rsync -a --exclude broadcast --exclude cache --exclude out "$ROOT/" "$WORK/repo/"
@@ -150,6 +154,10 @@ export ASSERTION_ID EXECUTOR=$USER
 python3 scripts/watch_index.py --controller "$CONTROLLER" --rpc "$LOCAL" \
   --expected-snapshot config/rehearsal/snapshot.json >"$WORK/logs/watch-pending.json" || true
 grep -q 'Challenge window is open' "$WORK/logs/watch-pending.json" || fail "watcher did not see the open challenge"
+python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --rpc "$LOCAL" \
+  --expected-snapshot config/rehearsal/snapshot.json --state-file "$WORK/monitor-state.json" \
+  >"$WORK/logs/monitor-pending.json" || true
+monitor_ok "$WORK/logs/monitor-pending.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor-pending.json)"
 cast rpc --rpc-url "$LOCAL" evm_increaseTime 259201 >/dev/null
 cast rpc --rpc-url "$LOCAL" evm_mine >/dev/null
 forge_script script/Maintain.s.sol:Settle "$USER"
@@ -158,6 +166,11 @@ forge_script script/Maintain.s.sol:Settle "$USER"
 python3 scripts/watch_index.py --controller "$CONTROLLER" --rpc "$LOCAL" \
   --expected-snapshot config/rehearsal/snapshot.json >"$WORK/logs/watch-accepted.json" || true
 grep -q 'awaits permissionless execution' "$WORK/logs/watch-accepted.json" || fail "watcher missed the acceptance"
+python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --rpc "$LOCAL" \
+  --expected-snapshot config/rehearsal/snapshot.json --state-file "$WORK/monitor-state.json" \
+  >"$WORK/logs/monitor-accepted.json" || true
+monitor_ok "$WORK/logs/monitor-accepted.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor-accepted.json)"
+grep -q 'awaits permissionless execution' "$WORK/logs/monitor-accepted.json" || fail "monitor did not report the due execution"
 
 step "Rehearsal passed"
 cat <<EOF
