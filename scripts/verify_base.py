@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Read-only Base integration preflight. No keys, signatures, or transactions."""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from fractions import Fraction
+from functools import lru_cache
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import urllib.request
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def request(url, payload=None):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers={
+        'Content-Type': 'application/json', 'User-Agent': 'm7cap-integration/0.1'})
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return json.load(response)
+
+
+@lru_cache(maxsize=None)
+def selector(signature):
+    # Ethereum uses Keccak, not hashlib.sha3_256; reuse installed Foundry.
+    return subprocess.check_output(['cast', 'sig', signature], text=True).strip()
+
+
+def word(value):
+    number = int(value, 16) if isinstance(value, str) else value
+    if not 0 <= number < 2**256:
+        raise ValueError('ABI word out of range')
+    return format(number, '064x')
+
+
+def words(encoded):
+    body = encoded[2:]
+    if len(body) % 64:
+        raise ValueError('Malformed ABI response')
+    return [int(body[i:i+64], 16) for i in range(0, len(body), 64)]
+
+
+def address(value):
+    return '0x' + format(value, '040x')
+
+
+class RPC:
+    def __init__(self, url):
+        self.url = url
+        chain = self.rpc('eth_chainId', [])
+        if int(chain, 16) != 8453:
+            raise ValueError('RPC is not Base mainnet')
+        self.block = self.rpc('eth_getBlockByNumber', ['latest', False])
+
+    def rpc(self, method, params):
+        response = request(self.url, {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params})
+        if 'error' in response:
+            raise ValueError(str(response['error']))
+        return response['result']
+
+    def call(self, target, signature, *args):
+        payload = selector(signature) + ''.join(word(arg) for arg in args)
+        return words(self.rpc('eth_call', [{'to': target, 'data': payload}, self.block['number']]))
+
+
+def bytes32_text(value):
+    encoded = value.encode('utf-8')
+    if not encoded or len(encoded) > 32 or b'\0' in encoded:
+        raise ValueError('Identifier must be 1-32 non-NUL UTF-8 bytes')
+    return int.from_bytes(encoded.ljust(32, b'\0'), 'big')
+
+
+def uma_preflight(rpc, manifest):
+    """Use current Finder allowlists, not potentially obsolete OOv3 defaults/caches."""
+    configured = manifest['uma_assertion_identifier']
+    if configured != 'ASSERT_TRUTH2':
+        raise ValueError('M7CAP requires explicit ASSERT_TRUTH2; no default/fallback is permitted')
+    identifier = bytes32_text(configured)
+    oracle, usdc = manifest['uma_oo_v3'], manifest['usdc']['address']
+    finder = address(rpc.call(oracle, 'finder()')[0])
+    implementations = {
+        name: address(rpc.call(finder, 'getImplementationAddress(bytes32)', bytes32_text(name))[0])
+        for name in ('IdentifierWhitelist', 'CollateralWhitelist', 'Store', 'Oracle', 'OptimisticOracleV3')
+    }
+    if implementations['OptimisticOracleV3'].lower() != oracle.lower():
+        raise ValueError('UMA Finder resolves a different OOv3; dispute provenance would not match')
+    supported = rpc.call(implementations['IdentifierWhitelist'], 'isIdentifierSupported(bytes32)', identifier)[0]
+    currency_supported = rpc.call(implementations['CollateralWhitelist'], 'isOnWhitelist(address)', usdc)[0]
+    if supported != 1:
+        raise ValueError('Configured UMA assertion identifier is not currently allowlisted')
+    if currency_supported != 1:
+        raise ValueError('USDC is not currently allowlisted by UMA')
+    default = rpc.call(oracle, 'defaultIdentifier()')[0]
+    cached_currency = rpc.call(oracle, 'cachedCurrencies(address)', usdc)
+    final_fee = rpc.call(implementations['Store'], 'computeFinalFee(address)', usdc)[0]
+    burned = rpc.call(oracle, 'burnedBondPercentage()')[0]
+    if len(cached_currency) != 2 or not 0 < burned <= 10**18:
+        raise ValueError('Malformed UMA currency cache or bond parameters')
+    # eth_call executes this non-view method locally and discards the changes; no transaction is sent.
+    rpc.call(oracle, 'syncUmaParams(bytes32,address)', identifier, usdc)
+    return {
+        'finder': finder, 'implementations': implementations,
+        'configured_identifier': configured, 'configured_identifier_bytes32': '0x' + word(identifier),
+        'configured_identifier_supported': True, 'usdc_currently_allowlisted': True,
+        'configured_identifier_cached': bool(rpc.call(oracle, 'cachedIdentifiers(bytes32)', identifier)[0]),
+        'oracle_default_identifier_bytes32': '0x' + word(default),
+        'oracle_default_identifier_text': default.to_bytes(32, 'big').rstrip(b'\0').decode('utf-8'),
+        'oracle_default_identifier_supported': bool(rpc.call(
+            implementations['IdentifierWhitelist'], 'isIdentifierSupported(bytes32)', default)[0]),
+        'cached_currency_allowlisted': bool(cached_currency[0]),
+        'cached_final_fee_usdc_raw': str(cached_currency[1]), 'current_final_fee_usdc_raw': str(final_fee),
+        'minimum_bond_cached_usdc_raw': str(rpc.call(oracle, 'getMinimumBond(address)', usdc)[0]),
+        'minimum_bond_after_sync_usdc_raw': str(final_fee * 10**18 // burned),
+        'sync_eth_call_succeeded': True,
+        'cache_persisted': False,
+    }
+
+
+def verify(manifest, rpc_url, snapshot=None, accounts=()):
+    rpc = RPC(rpc_url)
+    now = int(rpc.block['timestamp'], 16)
+    venue = manifest['venue']
+    report = {'chain_id': 8453, 'block': int(rpc.block['number'], 16),
+              'block_hash': rpc.block['hash'],
+              'block_timestamp': datetime.fromtimestamp(now, timezone.utc).isoformat(),
+              'rpc': rpc_url, 'errors': [], 'stocks': [], 'quotes': [],
+              'quote_basis': 'equal dollar allocations for liquidity probes; NOT index weights',
+              'funded_transaction_test': 'not performed by this read-only tool; see manifest native_fork_verification',
+              'launch_ready': False}
+    report['applied_risk_checks'] = manifest['risk_checks']
+
+    def require(condition, message):
+        if not condition:
+            raise ValueError(message)
+
+    def feed_data(asset, max_age):
+        require(rpc.call(asset['feed'], 'decimals()')[0] == asset['feed_decimals'], 'Feed decimals mismatch')
+        values = rpc.call(asset['feed'], 'latestRoundData()')
+        require(len(values) == 5 and 0 < values[1] < 2**255, 'Invalid feed answer')
+        require(0 < values[3] <= now and values[4] >= values[0], 'Invalid oracle round')
+        return {'answer': str(values[1]), 'updated_at': values[3],
+                'age_seconds': now - values[3], 'fresh': now - values[3] <= max_age}
+
+    issuer = {t['contract_address'].lower(): t for t in request(manifest['sources']['stock_api'])['tokens']}
+    require(rpc.call(manifest['usdc']['address'], 'decimals()')[0] == 6, 'USDC decimals mismatch')
+    report['usdc_feed'] = feed_data(manifest['usdc'], manifest['risk_checks']['max_usdc_feed_age_seconds'])
+    sequencer = rpc.call(manifest['sequencer_feed'], 'latestRoundData()')
+    require(len(sequencer) == 5 and sequencer[1] == 0, 'Sequencer down')
+    require(0 < sequencer[2] <= now and now-sequencer[2] > manifest['risk_checks']['sequencer_grace_seconds'],
+            'Sequencer grace period')
+    report['sequencer_up_since'] = sequencer[2]
+    report['uma'] = uma_preflight(rpc, manifest)
+    report['uma_minimum_bond_usdc_raw'] = report['uma']['minimum_bond_after_sync_usdc_raw']
+    for name in ('router', 'quoter'):
+        actual = address(rpc.call(venue[name], 'factory()')[0])
+        require(actual.lower() == venue['factory'].lower(), name + ' factory mismatch')
+    report['router_factory_match'] = True
+
+    def stock_check(stock):
+        token = stock['address']
+        official = issuer.get(token.lower())
+        require(official and official['symbol'] == stock['symbol'] and official['decimals'] == stock['decimals'],
+                'Issuer identity mismatch: ' + stock['symbol'])
+        # B20 tokens are native precompiles. A bytecode check would incorrectly reject them.
+        require(rpc.call(token, 'decimals()')[0] == stock['decimals'], 'Token decimals mismatch')
+        require(rpc.call(token, 'totalSupply()')[0] > 0, 'Empty token supply')
+        require(rpc.call(token, 'isPaused(uint8)', 0)[0] == 0, 'B20 transfers paused')
+        multiplier, paused = rpc.call(manifest['registry'], 'getOracleParams(address)', token)
+        require(multiplier > 0 and paused == 0, 'Issuer reference feed paused')
+        pool = address(rpc.call(venue['factory'], 'getPool(address,address,int24)',
+                                token, manifest['usdc']['address'], stock['tick_spacing'])[0])
+        require(pool.lower() == stock['pool'].lower(), 'Pool mismatch')
+        require(address(rpc.call(pool, 'factory()')[0]).lower() == venue['factory'].lower(), 'Pool factory mismatch')
+        pair = {address(rpc.call(pool, 'token0()')[0]).lower(), address(rpc.call(pool, 'token1()')[0]).lower()}
+        require(pair == {token.lower(), manifest['usdc']['address'].lower()}, 'Pool assets mismatch')
+        liquidity = rpc.call(pool, 'liquidity()')[0]
+        require(liquidity > 0, 'No active pool liquidity')
+        policies = {}
+        for scope in ('TRANSFER_SENDER_POLICY', 'TRANSFER_RECEIVER_POLICY', 'TRANSFER_EXECUTOR_POLICY'):
+            scope_hash = rpc.call(token, scope + '()')[0]
+            policy = rpc.call(token, 'policyId(bytes32)', scope_hash)[0]
+            policies[scope] = policy
+            for account in [pool, venue['router'], venue['quoter'], *accounts]:
+                require(rpc.call(manifest['policy_registry'], 'isAuthorized(uint64,address)', policy, account)[0] == 1,
+                        stock['symbol'] + ': policy rejects ' + account)
+        feed = feed_data(stock, manifest['risk_checks']['max_stock_feed_age_seconds'])
+        return {**stock, 'feed_data': feed, 'multiplier_wad': str(multiplier),
+                'active_liquidity': str(liquidity), 'policy_ids': policies}
+
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        report['stocks'] = list(executor.map(stock_check, manifest['stocks']))
+    stocks = report['stocks']
+    weights = [Fraction(1, 7)] * 7
+    if snapshot:
+        require(snapshot['symbols'] == [s['symbol'] for s in stocks], 'Snapshot symbol order mismatch')
+        ratios = [int(r) for r in snapshot['quantity_ratios']]
+        require(len(ratios) == 7 and sum(ratios) == 10**18 and all(r > 0 for r in ratios), 'Invalid ratios')
+        values = [Fraction(r * int(s['feed_data']['answer']), 10**s['feed_decimals']) for r, s in zip(ratios, stocks)]
+        weights = [v / sum(values) for v in values]
+        report['quote_basis'] = 'provided quantity ratios valued at current oracle snapshot; not a validation of company-cap data'
+        report['snapshot_observation_sha256'] = snapshot['observation_sha256']
+
+    def quote(stock, budget):
+        # Quote equal USD notionals by default, or the provided target human-quantity ratios.
+        price = Fraction(int(stock['feed_data']['answer']), 10**stock['feed_decimals'])
+        desired = int(budget * 10**stock['decimals'] / price)
+        require(desired > 0, 'Probe too small')
+        buy = rpc.call(venue['quoter'], 'quoteExactOutputSingle((address,address,uint256,int24,uint160))',
+                       manifest['usdc']['address'], stock['address'], desired, stock['tick_spacing'], 0)[0]
+        sell = rpc.call(venue['quoter'], 'quoteExactInputSingle((address,address,uint256,int24,uint160))',
+                        stock['address'], manifest['usdc']['address'], desired, stock['tick_spacing'], 0)[0]
+        require(buy > 0 and sell > 0, 'Zero executable quote')
+        return {'symbol': stock['symbol'], 'stock_amount_raw': str(desired),
+                'buy_usdc_raw': str(buy), 'sell_usdc_raw': str(sell)}
+
+    for budget in (10, 100, 1000):
+        with ThreadPoolExecutor(max_workers=7) as executor:
+            legs = list(executor.map(lambda pair: quote(pair[0], budget * pair[1]), zip(stocks, weights)))
+        buy = sum(int(leg['buy_usdc_raw']) for leg in legs)
+        sell = sum(int(leg['sell_usdc_raw']) for leg in legs)
+        report['quotes'].append({'reference_usd_notional': budget, 'legs': legs,
+                                 'buy_usdc_raw': str(buy), 'sell_usdc_raw': str(sell),
+                                 'buy_premium_bps_vs_reference': round((buy/(budget*10**6)-1)*10000, 4),
+                                 'sell_discount_bps_vs_reference': round((1-sell/(budget*10**6))*10000, 4)})
+    report['read_checks_passed'] = True
+    report['rebalance_oracles_currently_usable'] = report['usdc_feed']['fresh'] and all(s['feed_data']['fresh'] for s in stocks)
+    report['remaining_launch_blockers'] = list(manifest['launch_blockers'])
+    report['remaining_launch_blockers'] += ['Quotes are eth_call simulations at one block, not funded atomic gateway execution.']
+    return report
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--manifest', type=Path, default=ROOT / 'config/base.json')
+    p.add_argument('--rpc', default=os.environ.get('BASE_RPC_URL', 'https://base-rpc.publicnode.com'))
+    p.add_argument('--snapshot', type=Path, help='Optional output of index_snapshot.py; otherwise equal-dollar liquidity probes')
+    p.add_argument('--account', action='append', default=[], help='Also check planned vault/gateway/holder addresses against B20 policies')
+    args = p.parse_args()
+    try:
+        result = verify(json.loads(args.manifest.read_text()), args.rpc,
+                        json.loads(args.snapshot.read_text()) if args.snapshot else None, args.account)
+        print(json.dumps(result, indent=2))
+        # Passing a read check never grants production approval. Stale feed => fail closed for rebalance preflight.
+        return 0 if result['rebalance_oracles_currently_usable'] else 1
+    except Exception as exc:
+        print(json.dumps({'read_checks_passed': False, 'launch_ready': False, 'error': str(exc)}, indent=2))
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
