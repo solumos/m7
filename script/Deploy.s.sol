@@ -11,6 +11,7 @@ import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
 import {IOptimisticOracleV3} from "../src/interfaces/IOptimisticOracleV3.sol";
 import {IPolicyRegistry} from "../src/interfaces/IB20Policy.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
+import {RawCid} from "./RawCid.sol";
 
 /// @notice Reproducible deployment simulation. Nothing is broadcast unless explicitly requested by Forge.
 /// @dev The controller/vault pair uses CREATE address prediction, not a mutable initialization setter. The vault's
@@ -38,8 +39,14 @@ contract Deploy is Script {
         address feeOwner = vm.envOr("FEE_OWNER", deployer);
         if (feeOwner == address(0)) feeOwner = deployer; // the example environment leaves it zero
         string memory methodologyURI = vm.envString("METHODOLOGY_URI");
+        bytes memory methodology = bytes(vm.readFile("docs/METHODOLOGY.md"));
+        // The URI is immutable and printed in every claim, which is false if the document is not at that location.
+        require(
+            keccak256(bytes(methodologyURI)) == keccak256(bytes(RawCid.uri(methodology))),
+            "METHODOLOGY_URI must be the raw CIDv1 of docs/METHODOLOGY.md (python3 scripts/ipfs_cid.py)"
+        );
         Config memory c = _read(config);
-        bytes32 methodologyHash = keccak256(bytes(vm.readFile("docs/METHODOLOGY.md")));
+        bytes32 methodologyHash = keccak256(methodology);
         address predictedVault = vm.computeCreateAddress(deployer, uint256(vm.getNonce(deployer)) + 2);
 
         vm.startBroadcast(deployer);

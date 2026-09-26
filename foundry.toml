@@ -19,3 +19,6 @@ fail_on_revert = false
 
 [fmt]
 line_length = 110
+
+[lint]
+lint_on_build = false
