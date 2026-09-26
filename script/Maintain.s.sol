@@ -14,7 +14,7 @@ contract Propose is Script {
             controller.methodologyHash() == keccak256(bytes(vm.readFile("docs/METHODOLOGY.md"))),
             "methodology mismatch"
         );
-        string memory snapshot = vm.readFile("config/snapshot.json");
+        string memory snapshot = vm.readFile(vm.envOr("SNAPSHOT_FILE", string("config/snapshot.json")));
         uint256 quarter = vm.parseJsonUint(snapshot, ".quarter_id");
         require(quarter == controller.currentQuarter(), "wrong quarter");
         require(controller.canPropose(uint32(quarter)), "quarter has a live proposal");

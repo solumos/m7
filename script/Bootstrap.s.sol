@@ -15,7 +15,7 @@ contract Bootstrap is Script {
         address deployer = vm.envAddress("DEPLOYER");
         require(vault.bootstrapper() == deployer && vault.totalSupply() == 0, "invalid bootstrap state");
         _verifyLinkage(vault);
-        string memory config = vm.readFile("config/seed.json");
+        string memory config = vm.readFile(vm.envOr("SEED_FILE", string("config/seed.json")));
         require(vm.parseJsonAddress(config, ".vault") == address(vault), "wrong vault");
         require(vm.parseJsonUint(config, ".chain_id") == block.chainid, "wrong chain");
         address receiver = vm.parseJsonAddress(config, ".receiver");
