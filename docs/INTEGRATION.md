@@ -75,4 +75,4 @@ Before seeding approximately $1,000, complete:
 4. Fund and operate independent UMA proposal/dispute monitoring; test alerting and recovery before the first assertion. Public CLI reads alone are not a continuously running monitor.
 5. Re-run current source verification and read checks immediately before any deployment or bootstrap. Passing historical quotes does not reserve liquidity.
 
-No dedicated M7CAP/USDC liquidity pool is required. The ~$1,000 is seed backing; fees paid to existing pools, deployment gas, audits, monitoring, and oracle bonds are additional costs.
+No dedicated M7CAP/USDC liquidity pool is required. The ~$1,000 is seed backing; fees paid to existing pools, deployment gas, audits, monitoring, and oracle bonds are additional costs. The precision reserve permanently locks 10 of the initial 1,000 M7CAP shares (about $10 of a $1,000 seed). The reviewed bootstrap must hold at least 0.01 of every stock token to satisfy the minimum projected reserve of 10,000 raw units per stock. See the [internal audit](AUDIT.md) for the rounding fix and remaining findings.

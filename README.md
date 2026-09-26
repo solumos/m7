@@ -4,6 +4,8 @@ M7CAP turns a seven-stock Coinbase basket on Base into one transferable ERC-20 r
 
 This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. Live Base integration was tested on a local fork with native B20 execution; no live funds were spent. Initial, independently reviewed company-cap observations and operational oracle monitoring are still required before launch.
 
+The [2026-09-26 internal security review](docs/AUDIT.md) records findings, reproductions, and the depletion-rounding fix. Other economic and availability findings remain open.
+
 ## Run it
 
 Requirements: Foundry (tested with Forge 1.5.1), Python 3.9+, and Git for fetching pinned dependencies. No Node packages are required.
@@ -54,7 +56,9 @@ Canonical asset order is **AAPLc, AMZNc, GOOGLc, METAc, MSFTc, NVDAc, TSLAc, USD
 
 All eight-token operations are atomic. A blocked constituent or unfillable swap reverts the entire USDC operation. In-kind exits remain possible only when the required transfers succeed. A fully seized-to-zero stock stops new issuance; redemptions reflect remaining holdings. Partial frozen-asset claims are not implemented.
 
-The initial bootstrap issues 1,000 M7CAP against the supplied basket, permanently locking `0.000001` shares at address `0x01`. The rest goes to the seed receiver. The seed funder may initialize only once and has no subsequent authority. The initial share price depends on actual backing, not a guaranteed $1 peg.
+The initial bootstrap issues 1,000 M7CAP against the supplied basket, permanently locking **10 shares (1% of the seed backing)** at address `0x01`; the seed receiver receives 990 shares. For a $1,000 basket, approximately $10 stays permanently in the vault. The seed funder may initialize only once and has no subsequent authority. The initial share price depends on actual backing, not a guaranteed $1 peg.
+
+Each stock must have at least **10,000 raw units** attributable to those locked shares, computed as `floor(balance * LOCKED_SHARES / totalSupply)`. With eight-decimal stocks, bootstrap therefore needs at least `0.01` of each stock token. The vault checks this precision floor at bootstrap, after rebalancing, and before new issuance. Ordinary minting and redemption cannot lower backing per share. A full circulating-share redemption leaves a meaningful reserve, with less than one basis point of relative rounding error per stock in that redemption, instead of leaving one raw unit of every stock and amplifying the wrong basket on refill. This is a bound on that operation's rounding, not a guarantee against lifetime drift or donations. Issuer seizures below the precision floor stop new issuance; they do not add restrictions to redemption of remaining backing.
 
 ## User API
 

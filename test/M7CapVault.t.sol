@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {M7CapVault} from "../src/M7CapVault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
 import {Swap} from "../src/Types.sol";
@@ -99,8 +100,8 @@ contract M7CapVaultTest is Test {
 
     function testBootstrapIsFundedAndOneTime() public {
         assertEq(vault.totalSupply(), 1_000e18);
-        assertEq(vault.balanceOf(address(1)), 1e12);
-        assertEq(vault.balanceOf(address(this)), 1_000e18 - 1e12);
+        assertEq(vault.balanceOf(address(1)), 10e18);
+        assertEq(vault.balanceOf(address(this)), 990e18);
         for (uint256 i; i < 8; ++i) {
             assertEq(tokens[i].balanceOf(address(vault)), seed[i]);
         }
@@ -232,5 +233,104 @@ contract M7CapVaultTest is Test {
         assertEq(tokens[0].balanceOf(address(vault)), seed[0] - 1e6);
         assertEq(tokens[7].balanceOf(address(vault)), 5e6);
         assertEq(tokens[0].allowance(address(vault), address(router)), 0);
+    }
+
+    function testBootstrapRejectsInsufficientReserveAtomically() public {
+        M7CapVault fresh = new M7CapVault(tokens, address(this), router, router, address(this));
+        uint256[8] memory amounts;
+        for (uint256 i; i < 7; ++i) {
+            amounts[i] = 1e6; // Exactly 10,000 locked raw units at the 1% lock fraction.
+            tokens[i].approve(address(fresh), amounts[i]);
+        }
+        amounts[6] -= 1;
+        uint256 senderBalance = tokens[0].balanceOf(address(this));
+        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 6));
+        fresh.bootstrap(amounts, address(this));
+        assertEq(fresh.totalSupply(), 0);
+        assertEq(tokens[0].balanceOf(address(this)), senderBalance);
+        for (uint256 i; i < 7; ++i) {
+            assertEq(tokens[i].balanceOf(address(fresh)), 0);
+            assertEq(tokens[i].allowance(address(this), address(fresh)), 1e6);
+        }
+
+        amounts[6] += 1;
+        fresh.bootstrap(amounts, address(this));
+        assertEq(fresh.totalSupply(), fresh.INITIAL_SHARES());
+    }
+
+    function testRebalanceCannotReduceLockedPrecisionAndRollsBackSwaps() public {
+        Swap[] memory swaps = new Swap[](2);
+        swaps[0] = Swap(1, 7, 10, 1e6, 2e6);
+        swaps[1] = Swap(0, 7, 10, seed[0] - 1e6 + 1, 3e6);
+        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 0));
+        vault.rebalance(swaps, block.timestamp);
+        for (uint256 i; i < 8; ++i) {
+            assertEq(tokens[i].balanceOf(address(vault)), seed[i]);
+            assertEq(tokens[i].balanceOf(address(router)), 0);
+            assertEq(tokens[i].allowance(address(vault), address(router)), 0);
+        }
+    }
+
+    function testPartialSeizureBelowPrecisionFloorBlocksMintButAllowsExit() public {
+        VaultTestToken(address(tokens[0])).seize(address(vault), seed[0] - 999_999);
+        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 0));
+        vault.quoteMint(1e18);
+        uint256[8] memory maximums;
+        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 0));
+        vault.mintBasket(1e18, maximums, alice, block.timestamp);
+
+        uint256 circulating = vault.balanceOf(address(this));
+        uint256[8] memory amounts = vault.quoteRedeem(circulating);
+        vault.redeemBasket(circulating, amounts, bob, block.timestamp);
+        assertEq(vault.totalSupply(), vault.LOCKED_SHARES());
+        assertEq(tokens[0].balanceOf(bob), amounts[0]);
+        assertGt(amounts[0], 0);
+        assertEq(tokens[6].balanceOf(bob), amounts[6]);
+    }
+
+    function testFuzzFullExitAndRefillPreservesPrecision(uint64 rawBalance, uint8 rawCycles) public {
+        // Unequal, non-divisible seed positions exercise rounding rather than exact multiples.
+        uint256 firstBalance = bound(uint256(rawBalance), 1e6, 1e12);
+        uint256 cycles = bound(uint256(rawCycles), 1, 5);
+        M7CapVault fresh = new M7CapVault(tokens, address(this), router, router, address(this));
+        uint256[8] memory initial;
+        for (uint256 i; i < 7; ++i) {
+            initial[i] = firstBalance * (i + 1) + i + 1;
+            tokens[i].approve(address(fresh), type(uint256).max);
+        }
+        fresh.bootstrap(initial, address(this));
+        for (uint256 cycle; cycle < cycles; ++cycle) {
+            uint256 supplyBefore = fresh.totalSupply();
+            uint256[8] memory beforeBalances;
+            for (uint256 i; i < 7; ++i) {
+                beforeBalances[i] = tokens[i].balanceOf(address(fresh));
+            }
+            uint256 circulating = fresh.balanceOf(address(this));
+            uint256[8] memory amounts = fresh.quoteRedeem(circulating);
+            fresh.redeemBasket(circulating, amounts, address(this), block.timestamp);
+            for (uint256 i; i < 7; ++i) {
+                uint256 residual = tokens[i].balanceOf(address(fresh));
+                assertGe(residual, fresh.MIN_LOCKED_STOCK_UNITS());
+                assertEq(
+                    residual,
+                    Math.mulDiv(beforeBalances[i], fresh.LOCKED_SHARES(), supplyBefore, Math.Rounding.Ceil)
+                );
+                // No underbacking, <1 raw unit rounding, and <1 bp relative rounding per full exit.
+                uint256 excess = residual * supplyBefore - beforeBalances[i] * fresh.LOCKED_SHARES();
+                assertLt(excess, supplyBefore);
+                assertLt(excess * 10_000, beforeBalances[i] * fresh.LOCKED_SHARES());
+            }
+            uint256 refillShares = fresh.INITIAL_SHARES() - fresh.LOCKED_SHARES();
+            uint256[8] memory refill = fresh.quoteMint(refillShares);
+            fresh.mintBasket(refillShares, refill, address(this), block.timestamp);
+            for (uint256 i; i < 7; ++i) {
+                assertGe(tokens[i].balanceOf(address(fresh)), beforeBalances[i]);
+                // Returning to 1,000 shares multiplies each residual by exactly 100.
+                // Even repeated exit/refill cycles preserve the original within the one-exit bound.
+                uint256 increase = tokens[i].balanceOf(address(fresh)) - initial[i];
+                assertLt(increase, 100);
+                assertLt(increase * 10_000, initial[i]);
+            }
+        }
     }
 }

@@ -17,7 +17,9 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
     using SafeERC20 for IERC20;
 
     uint256 public constant INITIAL_SHARES = 1_000e18;
-    uint256 public constant LOCKED_SHARES = 1e12;
+    // A 1% seed reserve prevents near-empty redemptions from resetting basket proportions to dust.
+    uint256 public constant LOCKED_SHARES = 10e18;
+    uint256 public constant MIN_LOCKED_STOCK_UNITS = 10_000;
     address public constant SEED_LOCK = address(1);
     IERC20[8] public override assets;
     address public immutable controller;
@@ -36,6 +38,7 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
     error OutputLimit(uint256 index);
     error TransferMismatch(uint256 index);
     error MissingComponent(uint256 index);
+    error InsufficientLockedBacking(uint256 index);
     error InvalidSwap();
 
     event Bootstrapped(address indexed receiver, uint256[8] amounts);
@@ -83,6 +86,9 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
         }
         if (amounts[7] != 0) revert InvalidAmount();
         _pull(amounts);
+        for (uint256 i; i < 7; ++i) {
+            _checkLockedBacking(i, assets[i].balanceOf(address(this)), INITIAL_SHARES);
+        }
         _mint(SEED_LOCK, LOCKED_SHARES);
         _mint(receiver, INITIAL_SHARES - LOCKED_SHARES);
         emit Bootstrapped(receiver, amounts);
@@ -96,6 +102,7 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
             uint256 balance = assets[i].balanceOf(address(this));
             // A seized-to-zero stock is not silently dropped from future issuance.
             if (i < 7 && balance == 0) revert MissingComponent(i);
+            if (i < 7) _checkLockedBacking(i, balance, supply);
             amounts[i] = Math.mulDiv(balance, sharesOut, supply, Math.Rounding.Ceil);
         }
     }
@@ -190,7 +197,20 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
                 revert OutputLimit(trade.tokenOut);
             }
         }
+        uint256 supply = totalSupply();
+        for (uint256 i; i < 7; ++i) {
+            _checkLockedBacking(i, assets[i].balanceOf(address(this)), supply);
+        }
         emit BasketRebalanced(swaps.length);
+    }
+
+    /// @dev A full circulating exit rounds each residual position by less than one raw unit.
+    /// At least 10,000 units of locked backing bounds that exit's relative rounding below one bp.
+    /// Ordinary mint/redeem cannot reduce backing per share; seizure may stop issuance, never exits.
+    function _checkLockedBacking(uint256 index, uint256 balance, uint256 supply) private pure {
+        if (Math.mulDiv(balance, LOCKED_SHARES, supply) < MIN_LOCKED_STOCK_UNITS) {
+            revert InsufficientLockedBacking(index);
+        }
     }
 
     function _pull(uint256[8] memory amounts) private {
