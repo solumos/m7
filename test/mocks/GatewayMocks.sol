@@ -4,8 +4,9 @@ pragma solidity 0.8.30;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../../src/interfaces/ISlipstreamRouter.sol";
+import {B20PolicyMixin} from "./PolicyMocks.sol";
 
-contract GatewayToken is ERC20 {
+contract GatewayToken is ERC20, B20PolicyMixin {
     uint8 private immutable _tokenDecimals;
     bool public blocked;
 
@@ -57,6 +58,7 @@ contract GatewayRouter is ISlipstreamRouter {
     bool public partialInput;
     address public reentryTarget;
     bytes public reentryData;
+    int24 public lastTickSpacing;
 
     constructor(address factory_, address usdc_) {
         factory = factory_;
@@ -81,6 +83,7 @@ contract GatewayRouter is ISlipstreamRouter {
         returns (uint256 amountIn)
     {
         _beforeSwap(p.recipient, p.deadline);
+        lastTickSpacing = p.tickSpacing;
         require(p.tokenIn == usdc && p.tokenOut != usdc, "invalid buy");
         require(p.sqrtPriceLimitX96 == 0, "price limit");
         amountIn = (p.amountOut + 99) / 100;
@@ -95,6 +98,7 @@ contract GatewayRouter is ISlipstreamRouter {
         returns (uint256 amountOut)
     {
         _beforeSwap(p.recipient, p.deadline);
+        lastTickSpacing = p.tickSpacing;
         require(p.tokenOut == usdc && p.tokenIn != usdc, "invalid sell");
         require(p.sqrtPriceLimitX96 == 0, "price limit");
         uint256 spent = partialInput ? p.amountIn / 2 : p.amountIn;

@@ -11,10 +11,12 @@ import {Valuation, IAggregatorV3, ICoinbaseOracleRegistry} from "../src/Valuatio
 import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
 import {IOptimisticOracleV3} from "../src/interfaces/IOptimisticOracleV3.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
+import {IPolicyRegistry} from "../src/interfaces/IB20Policy.sol";
+import {VaultHarness} from "./mocks/VaultHarness.sol";
 
 /// @dev Opt in with BASE_FORK_TEST=true and use Base's patched forge with FOUNDRY_BASE=true.
 /// This is a local fork: only USDC is dealt; every B20 is acquired from its actual live-state pool.
-contract BaseForkTest is Test {
+contract BaseForkTest is VaultHarness {
     using SafeERC20 for IERC20;
 
     string private constant FIXTURE =
@@ -38,8 +40,9 @@ contract BaseForkTest is Test {
             );
         }
 
-        M7CapVault vault = new M7CapVault(assets, address(this), router, factory, address(this));
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), router, factory);
+        IPolicyRegistry registry = IPolicyRegistry(vm.parseJsonAddress(manifest, ".policy_registry"));
+        (M7CapVault vault,) = _deployVault(assets, routes, router, factory, registry);
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), address(this)); // default 1 bp fee
         // Forge mutates only this local fork's standard USDC storage, never native B20 state.
         deal(address(assets[7]), address(this), 2_000e6);
         uint256[8] memory seed;
@@ -72,12 +75,12 @@ contract BaseForkTest is Test {
         assets[7].safeTransfer(user, 100e6);
         vm.startPrank(user);
         assets[7].forceApprove(address(gateway), 100e6);
-        uint256 spent = gateway.mintWithUSDC(100e18, 100e6, user, block.timestamp, routes);
+        uint256 spent = gateway.mintWithUSDC(100e18, 100e6, user, block.timestamp);
         assertEq(vault.balanceOf(user), 100e18);
         assertGt(spent, 50e6);
         assertLe(spent, 100e6);
         vault.approve(address(gateway), 100e18);
-        uint256 received = gateway.redeemToUSDC(100e18, spent * 95 / 100, user, block.timestamp, routes);
+        uint256 received = gateway.redeemToUSDC(100e18, spent * 95 / 100, user, block.timestamp);
         vm.stopPrank();
         emit log_named_uint("Mint USDC cost (6 decimals)", spent);
         emit log_named_uint("Redemption USDC proceeds (6 decimals)", received);
@@ -85,7 +88,7 @@ contract BaseForkTest is Test {
         assertEq(assets[7].balanceOf(user), 100e6 - spent + received);
         for (uint256 i; i < 8; ++i) {
             assertGe(assets[i].balanceOf(address(vault)), seed[i]);
-            assertEq(assets[i].balanceOf(address(gateway)), 0);
+            assertEq(assets[i].balanceOf(address(gateway)), i == 7 ? gateway.accruedFees() : 0);
             assertEq(assets[i].allowance(address(gateway), address(router)), 0);
             assertEq(assets[i].allowance(address(gateway), address(vault)), 0);
         }
@@ -111,7 +114,7 @@ contract BaseForkTest is Test {
         vm.startPrank(proposer);
         usdc.forceApprove(address(controller), bond);
         bytes32 assertionId =
-            controller.propose(quarter, ratios, abi.encodePacked("data:text/plain,", FIXTURE));
+            controller.propose(quarter, ratios, "ipfs://local-fork-fixture", sha256(bytes(FIXTURE)));
         vm.stopPrank();
 
         IOptimisticOracleV3.Assertion memory assertion = oracle.getAssertion(assertionId);
@@ -171,16 +174,31 @@ contract BaseForkTest is Test {
         address predictedVault =
             vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
         controller = new IndexController(
-            IM7CapVault(predictedVault), oracle, assets[7], 1_000e6, keccak256(bytes(FIXTURE)), valuation
+            IM7CapVault(predictedVault),
+            oracle,
+            assets[7],
+            1_000e6,
+            keccak256(bytes(FIXTURE)),
+            "ipfs://local-fork-fixture-methodology",
+            valuation
         );
         M7CapVault vault = new M7CapVault(
             assets,
+            _manifestSpacings(manifest),
             address(controller),
             ISlipstreamRouter(vm.parseJsonAddress(manifest, ".venue.router")),
             ISlipstreamFactory(vm.parseJsonAddress(manifest, ".venue.factory")),
+            IPolicyRegistry(vm.parseJsonAddress(manifest, ".policy_registry")),
             address(this)
         );
         assertEq(address(vault), predictedVault);
+    }
+
+    function _manifestSpacings(string memory manifest) private pure returns (int24[7] memory spacings) {
+        for (uint256 i; i < 7; ++i) {
+            string memory prefix = string.concat(".stocks[", vm.toString(i), "]");
+            spacings[i] = int24(uint24(vm.parseJsonUint(manifest, string.concat(prefix, ".tick_spacing"))));
+        }
     }
 
     function _startFork() private {

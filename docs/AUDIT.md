@@ -9,11 +9,21 @@ Reviewed commit [`ac11b0930af0a778a0d37a90b49ede5add359df4`](https://github.com/
 | ID | Severity / category | Finding | Status |
 | --- | --- | --- | --- |
 | M-01 | Medium — index correctness | Near-empty redemption changes the basket that later deposits amplify | Fixed; regression tests added |
-| M-02 | Medium — economic execution | Unnecessary trades can consume the entire 50 bp portfolio loss allowance | Open; reproduced with modeled venue |
-| M-03 | Medium — availability | Healthy stock feeds can be too old throughout the permitted execution window | Open; documented limitation, reproduced |
-| L-01 | Low — funded griefing | A disputed first proposal prevents parallel valid proposals | Open; reproduced with modeled dispute |
-| D-01 | High impact — conditional design risk | One transfer-frozen stock blocks withdrawal of otherwise healthy assets | Open; previously disclosed |
-| D-02 | Conditional Medium — policy integration | Underlying address exclusions do not carry through to M7CAP holders | Requirements decision needed; reproduced |
+| M-02 | Medium (re-rated High in review 2) — economic execution | Unnecessary trades can consume the entire 50 bp portfolio loss allowance | Fixed after review 2; regression tests |
+| M-03 | Medium — availability | Healthy stock feeds can be too old throughout the permitted execution window | Fixed after review 2; replay evidence |
+| L-01 | Low (re-rated Medium in review 2) — funded griefing | A disputed first proposal prevents parallel valid proposals | Fixed after review 2; regression tests |
+| D-01 | High impact — conditional design risk | One transfer-frozen stock blocks withdrawal of otherwise healthy assets | Fixed for in-kind exits after review 2 |
+| D-02 | Conditional Medium — policy integration | Underlying address exclusions do not carry through to M7CAP holders | Fixed after review 2 (enforcement chosen) |
+
+**Remediation status.** After the [second review](AUDIT-2.md), the code was changed to fix every open finding. The sections below describe the original code at `ac11b09` and remain the record of what was found. The current behavior and its tests are:
+
+- **M-02.** `execute(deadline)` takes no trades from the executor; the controller plans every leg. Pools are pinned per stock, each stock is only sold or only bought, and each leg's minimum output is its oracle value less 1%. Loss is bounded by 1% of traded value, not 50 bp of NAV. Regressions: `testExecutorCannotSpendLossAllowanceOnUnnecessaryTrades`, `testLossIsBoundedByNeededTurnoverThroughAnExtractiveVenue`, and `test/ControllerPlanner.t.sol`.
+- **M-03.** Every stock price must be at most 25 h old and at least one at most 1 h old, weekdays 15:00–20:00 UTC. A replay of ten recent weekdays found 96% of slots usable, against under 1% before (see [INTEGRATION.md](INTEGRATION.md)). Regression: `testQuietButHeartbeatConformingFeedNoLongerBlocksExecution`.
+- **L-01.** A disputed proposal, or one still unsettled a day after its challenge window, no longer blocks a replacement; the first to settle true is executed. Regression: `testDisputedProposalNoLongerBlocksAReplacement`.
+- **D-01.** `redeemBasketWithClaims` delivers every movable leg and turns the rest into claims withdrawable later; the gateway path stays atomic. Tests: `test/VaultClaims.t.sol`.
+- **D-02.** M7CAP transfers, mints, redemptions and claim withdrawals check the stocks' B20 transfer policies. Regression: `testStockAddressExclusionPropagatesToReceiptHolders`; matrix in `test/VaultPolicy.t.sol`.
+
+The stack is still not ready for public deposits. It has had no external audit, and the native Base fork tests have not been re-run against the current code. Residual risks are listed in the second review.
 
 Severity considers impact and prerequisites. Medium covers bounded value loss, material index-tracking failure, or maintenance unavailability. Low covers a costly, limited disruption. D-01's high impact requires an issuer transfer pause or policy rejection; it is not evidence that an arbitrary user can freeze the vault. D-02 is a defect only if receipt-level eligibility enforcement is a product requirement. No critical issue was confirmed within this scope.
 

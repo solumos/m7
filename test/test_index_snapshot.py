@@ -31,6 +31,15 @@ def observations():
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_published_canonical_bytes_reproduce_the_asserted_digest(self):
+        import hashlib
+        document = observations()
+        snapshot = index.compile_snapshot(document)
+        self.assertEqual('0x' + hashlib.sha256(index.canonical_bytes(document)).hexdigest(),
+                         snapshot['observation_sha256'])
+        reordered = dict(reversed(list(document.items())))
+        self.assertEqual(index.canonical_bytes(reordered), index.canonical_bytes(document))
+
     def test_classes_count_once_and_human_quantity_normalization(self):
         snapshot = index.compile_snapshot(observations())
         self.assertEqual(snapshot['quarter_id'], 2026 * 4 + 2)

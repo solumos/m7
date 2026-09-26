@@ -29,6 +29,25 @@ def selector(signature):
     return subprocess.check_output(['cast', 'sig', signature], text=True).strip()
 
 
+@lru_cache(maxsize=None)
+def keccak_text(text):
+    return int(subprocess.check_output(['cast', 'keccak', text], text=True).strip(), 16)
+
+
+def rebalance_oracles_usable(now, stock_ages, usdc_age, risk):
+    """Mirror Valuation.snapshot(): weekday window, every stock within its heartbeat age, one stock fresh."""
+    day_of_week = (now // 86400 + 4) % 7
+    time_of_day = now % 86400
+    start, end = risk['execution_window_utc_seconds']
+    checks = {
+        'in_execution_window': day_of_week not in (0, 6) and start <= time_of_day < end,
+        'stocks_within_max_age': all(age <= risk['max_stock_feed_age_seconds'] for age in stock_ages),
+        'market_open_signal': any(age <= risk['fresh_signal_seconds'] for age in stock_ages),
+        'usdc_within_max_age': usdc_age <= risk['max_usdc_feed_age_seconds'],
+    }
+    return all(checks.values()), checks
+
+
 def word(value):
     number = int(value, 16) if isinstance(value, str) else value
     if not 0 <= number < 2**256:
@@ -64,6 +83,9 @@ class RPC:
     def call(self, target, signature, *args):
         payload = selector(signature) + ''.join(word(arg) for arg in args)
         return words(self.rpc('eth_call', [{'to': target, 'data': payload}, self.block['number']]))
+
+    def balance(self, target):
+        return int(self.rpc('eth_getBalance', [target, self.block['number']]), 16)
 
 
 def bytes32_text(value):
@@ -181,6 +203,8 @@ def verify(manifest, rpc_url, snapshot=None, accounts=()):
         policies = {}
         for scope in ('TRANSFER_SENDER_POLICY', 'TRANSFER_RECEIVER_POLICY', 'TRANSFER_EXECUTOR_POLICY'):
             scope_hash = rpc.call(token, scope + '()')[0]
+            # M7CapVault requires identical scope constants across all seven stocks.
+            require(scope_hash == keccak_text(scope), stock['symbol'] + ': unexpected ' + scope + ' constant')
             policy = rpc.call(token, 'policyId(bytes32)', scope_hash)[0]
             policies[scope] = policy
             for account in [pool, venue['router'], venue['quoter'], *accounts]:
@@ -226,7 +250,11 @@ def verify(manifest, rpc_url, snapshot=None, accounts=()):
                                  'buy_premium_bps_vs_reference': round((buy/(budget*10**6)-1)*10000, 4),
                                  'sell_discount_bps_vs_reference': round((1-sell/(budget*10**6))*10000, 4)})
     report['read_checks_passed'] = True
-    report['rebalance_oracles_currently_usable'] = report['usdc_feed']['fresh'] and all(s['feed_data']['fresh'] for s in stocks)
+    usable, checks = rebalance_oracles_usable(
+        now, [s['feed_data']['age_seconds'] for s in stocks], report['usdc_feed']['age_seconds'],
+        manifest['risk_checks'])
+    report['rebalance_oracle_checks'] = checks
+    report['rebalance_oracles_currently_usable'] = usable
     report['remaining_launch_blockers'] = list(manifest['launch_blockers'])
     report['remaining_launch_blockers'] += ['Quotes are eth_call simulations at one block, not funded atomic gateway execution.']
     return report

@@ -6,8 +6,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IOptimisticOracleV3} from "../../src/interfaces/IOptimisticOracleV3.sol";
 import {IAggregatorV3, ICoinbaseOracleRegistry} from "../../src/Valuation.sol";
 import {Swap} from "../../src/Types.sol";
+import {B20PolicyMixin} from "./PolicyMocks.sol";
 
-contract ControllerToken is ERC20 {
+contract ControllerToken is ERC20, B20PolicyMixin {
     uint8 private immutable _decimals;
 
     constructor(uint8 decimals_) ERC20("Controller test token", "TEST") {
@@ -155,20 +156,42 @@ contract ControllerOracle is IOptimisticOracleV3 {
     }
 }
 
-/// @dev Test-only balance mutation simulates arbitrary swap results so postconditions can be adversarially tested.
+/// @dev Test-only vault double for the controller. Each leg converts at fair value from the live mock feeds,
+///      scaled by `outputBps`. Optional scripted balances, dilution and a mid-execution feed change let the
+///      controller's postconditions be tested adversarially.
 contract ControllerVault is ERC20 {
-    IERC20[8] public assets;
+    IERC20[8] private _assets;
+    ControllerFeed[8] private _feeds;
     uint256[8] public afterBalances;
     bool public mutate;
     bool public dilute;
     uint256 public calls;
+    uint256 public outputBps = 10_000;
     ControllerFeed public changeFeed;
+    Swap[] private _legs;
 
-    constructor(address[8] memory assets_) ERC20("Test vault", "TEST") {
+    constructor(address[8] memory assets_, ControllerFeed[8] memory feeds_) ERC20("Test vault", "TEST") {
         for (uint256 i; i < 8; ++i) {
-            assets[i] = IERC20(assets_[i]);
+            _assets[i] = IERC20(assets_[i]);
+            _feeds[i] = feeds_[i];
         }
-        _mint(msg.sender, 100e18);
+        _mint(msg.sender, 1_000e18);
+    }
+
+    function assets(uint256 index) external view returns (IERC20) {
+        return _assets[index];
+    }
+
+    function backing(uint256 index) external view returns (uint256) {
+        return _assets[index].balanceOf(address(this));
+    }
+
+    function LOCKED_SHARES() external pure returns (uint256) {
+        return 10e18;
+    }
+
+    function MIN_LOCKED_STOCK_UNITS() external pure returns (uint256) {
+        return 10_000;
     }
 
     function setAfter(uint256[8] memory amounts) external {
@@ -184,21 +207,46 @@ contract ControllerVault is ERC20 {
         changeFeed = feed;
     }
 
-    function rebalance(Swap[] calldata, uint256 deadline) external {
+    function setOutputBps(uint256 bps) external {
+        outputBps = bps;
+    }
+
+    function legCount() external view returns (uint256) {
+        return _legs.length;
+    }
+
+    function legAt(uint256 index) external view returns (Swap memory) {
+        return _legs[index];
+    }
+
+    function rebalance(Swap[] calldata swaps, uint256 deadline) external {
         require(block.timestamp <= deadline, "deadline");
         ++calls;
+        for (uint256 k; k < swaps.length; ++k) {
+            Swap calldata leg = swaps[k];
+            _legs.push(leg);
+            ControllerToken(address(_assets[leg.tokenIn])).burn(address(this), leg.amountIn);
+            uint256 fair = leg.amountIn * _price(leg.tokenIn) * _unit(leg.tokenOut)
+                / (_price(leg.tokenOut) * _unit(leg.tokenIn));
+            ControllerToken(address(_assets[leg.tokenOut])).mint(address(this), fair * outputBps / 10_000);
+        }
         if (mutate) {
             for (uint256 i; i < 8; ++i) {
-                ControllerToken token = ControllerToken(address(assets[i]));
-                uint256 beforeBalance = token.balanceOf(address(this));
-                if (afterBalances[i] > beforeBalance) {
-                    token.mint(address(this), afterBalances[i] - beforeBalance);
-                } else {
-                    token.burn(address(this), beforeBalance - afterBalances[i]);
-                }
+                ControllerToken token = ControllerToken(address(_assets[i]));
+                uint256 current = token.balanceOf(address(this));
+                if (afterBalances[i] > current) token.mint(address(this), afterBalances[i] - current);
+                else token.burn(address(this), current - afterBalances[i]);
             }
         }
         if (dilute) _mint(msg.sender, 1e18);
         if (address(changeFeed) != address(0)) changeFeed.set(1e8, block.timestamp);
+    }
+
+    function _price(uint256 index) private view returns (uint256) {
+        return uint256(_feeds[index].answer());
+    }
+
+    function _unit(uint256 index) private pure returns (uint256) {
+        return index == 7 ? 1e6 : 1e8;
     }
 }

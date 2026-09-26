@@ -10,6 +10,8 @@ The stocks are B20 native precompiles and have no ordinary bytecode. Never rejec
 
 All seven direct USDC pairs exist with active liquidity at tick spacing **10** on Aerodrome's gauges V3 factory. The router and quoter both report that same factory. Initial and gauge-caps factories were also probed across tick spacings 1, 10, 50, 100, 200, 500, and 2000; no stock pairs were found there. Chosen deployments come from the [Aerodrome repository](https://github.com/aerodrome-finance/slipstream#deployments).
 
+Anyone can create a pool at an unused enabled tick spacing on this factory, and non-canonical constituent pools already exist. On 2026-09-26, AAPLc/USDC at tick spacing 200 had zero active liquidity at the minimum tick, and AMZNc/USDC at 1 and NVDAc/USDC at 200 held only dust. The vault therefore pins each stock's reviewed tick spacing (`tick_spacing` in the manifest, currently 10) at construction. Neither rebalances nor the gateway can use any other pool.
+
 | Integration | Address |
 | --- | --- |
 | Slipstream factory | `0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef` |
@@ -19,7 +21,7 @@ All seven direct USDC pairs exist with active liquidity at tick spacing **10** o
 | B20 policy registry | `0x8453000000000000000000000000000000000002` |
 | UMA OOv3 | `0x2aBf1Bd76655de80eDB3086114315Eec75AF500c` |
 
-The issuer oracle registry's verified ABI has `getOracleParams(address) -> (uint256 multiplier, bool paused)`. The actual onchain read succeeded for all seven tokens. Transfer sender, receiver, and executor policy IDs were all 5 at the observation block, and the selected pools, router, and quoter were authorized for those policies. Future vault/gateway/holder addresses must be checked individually: a public pool's authorization does not establish theirs. Policies may change. [Verified registry source](https://base.blockscout.com/api/v2/smart-contracts/0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD), [B20 interfaces](https://github.com/base/base-std/blob/main/src/interfaces/IB20.sol)
+The issuer oracle registry's verified ABI has `getOracleParams(address) -> (uint256 multiplier, bool paused)`. The actual onchain read succeeded for all seven tokens. Transfer sender, receiver, and executor policy IDs were all 5 at the observation block, and the selected pools, router, and quoter were authorized for those policies. Future vault/gateway/holder addresses must be checked individually: a public pool's authorization does not establish theirs. Policies may change. Policy 5 authorized an arbitrary address when probed, so it behaves as a blocklist. The three transfer-scope constants equal the Keccak-256 of their names on every stock; the preflight checks this and the vault requires it. M7CAP applies the same sender, receiver and executor policies to its own holders through the registry at `0x8453…0002`. An address blocked for any stock therefore cannot receive, send or redeem M7CAP. A switch to an allowlist would also freeze M7CAP held by unlisted contracts. [Verified registry source](https://base.blockscout.com/api/v2/smart-contracts/0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD), [B20 interfaces](https://github.com/base/base-std/blob/main/src/interfaces/IB20.sol)
 
 Native USDC has 6 decimals and its USD feed has 8 decimals. The Base sequencer reported up beyond the grace period. UMA's `getMinimumBond(USDC)` returned **500,000,000 raw USDC = 500 USDC**; this is separate bond capital, not stock backing or necessarily a spent fee. Re-query at proposal time. [Circle addresses](https://developers.circle.com/stablecoins/usdc-contract-addresses), [UMA addresses](https://github.com/UMAprotocol/protocol/blob/master/packages/core/networks/8453.json)
 
@@ -43,9 +45,27 @@ The quoter successfully simulated exact-output USDC purchases and exact-input st
 
 Buy and sell quotes are independent calls against the same starting block, not consecutive legs of a simulated round trip. Values exclude gas and are relative to the published oracle reference (which can be stale), not an assertion of current fair value. Per-component raw quantities and quote results are in the manifest. An `eth_call` quoter result does not prove that a funded user can complete a seven-swap atomic gateway transaction, including all issuer policy checks.
 
-Both stock and USDC feeds have published 24-hour heartbeats. Stock reference values also stop updating outside market sessions. The controller's conservative execution policy requires stock updates within **1 hour**, USDC within **25 hours**, and a **1-hour** sequencer recovery grace period. Thus a valid but old stock reference price blocks rebalancing, including much of a weekend or quiet session. Quantity-based basket mint/redeem does not use these reference prices. At this captured weekend block, the stock freshness gate fails, and the read preflight correctly reports rebalance ineligible. [Feed behavior](https://docs.chain.link/data-feeds/tokenized-equity-feeds/coinbase), [USDC feed directory](https://reference-data-directory.vercel.app/feeds-ethereum-mainnet-base-1.json), [sequencer guidance](https://docs.chain.link/data-feeds/l2-sequencer-feeds)
+Both stock and USDC feeds have published 24-hour heartbeats. Stock reference values also stop updating outside market sessions. The controller's execution policy requires:
+- every stock update at most **25 hours** old (heartbeat liveness);
+- at least one stock update at most **1 hour** old, as evidence the market is trading;
+- USDC at most **25 hours** old;
+- a **1-hour** sequencer recovery grace period;
+- weekdays **15:00–20:00 UTC**.
+
+A quiet feed inside its 0.5% deviation band is still accurate, so it no longer blocks execution. Holidays fail closed unless a heartbeat lands on them. The planner's per-leg oracle minimums and bounded step limit what a stale-but-accepted price can cost. Quantity-based basket mint/redeem does not use these reference prices. At the captured weekend block the window is closed, and the read preflight correctly reports rebalance ineligible.
+
+`scripts/feed_availability.py` replays past windows from each feed's round history. For the ten weekdays from 2026-09-14 to 2026-09-25 (Base block 51,835,998), in ten-minute slots:
+
+| Rule | Usable slots | Weekdays with no usable slot |
+| --- | ---: | ---: |
+| Original: every stock ≤1 h, 15:00–17:00 UTC | 1 of 120 | 9 of 10 |
+| Current: every stock ≤25 h and one ≤1 h, 15:00–20:00 UTC | 288 of 300 | 0 of 10 |
+
+Registry pauses and sequencer outages are not replayed. [Feed behavior](https://docs.chain.link/data-feeds/tokenized-equity-feeds/coinbase), [USDC feed directory](https://reference-data-directory.vercel.app/feeds-ethereum-mainnet-base-1.json), [sequencer guidance](https://docs.chain.link/data-feeds/l2-sequencer-feeds)
 
 ## Native Base fork round trip
+
+The native results below predate the remediation of both internal reviews and have not been re-run against the current contracts. Re-running them with Base's patched Forge is a launch gate.
 
 `test/BaseFork.t.sol:testBaseNativeB20BootstrapAndUSDCRoundTrip` passed at Base block **51,830,602** using the official [Base Foundry v1.1.0 build](https://github.com/base/base-anvil). This is an execution test on a local fork, distinct from the historical read-only quote snapshot above. The test created 2,000 USDC solely in local fork storage; it acquired every B20 token through its actual live-state Slipstream pool and used native B20 transfer behavior. No B20 balance or code was fabricated, and no live funds or transactions were used.
 
@@ -70,9 +90,9 @@ The second command requires real addresses and the output of `index_snapshot.py`
 Before seeding approximately $1,000, complete:
 
 1. Produce and independently review sourced quarter-end observations and the bootstrap basket; exercise the actual market-cap allocation with `--snapshot`.
-2. Repeat the successful local native-fork test with the reviewed market-cap bootstrap allocation and final deployment configuration/addresses, then validate production readiness. Extend native integration coverage to issuer policy rejection, full rollback, the disputed UMA path, and stock rebalance execution. The current native test covers USDC/raw-stock decimal conversion, approvals, seven-stock mint, refund, redemption, and cleared allowances.
+2. Repeat the successful local native-fork test with the reviewed market-cap bootstrap allocation and final deployment configuration/addresses, then validate production readiness. Extend native integration coverage to issuer policy rejection and M7CAP policy mirroring against the live registry (including its gas cost), full rollback, deferred claims, the disputed UMA path, and planner-driven stock rebalance execution. The current native test covers USDC/raw-stock decimal conversion, approvals, seven-stock mint, refund, redemption, and cleared allowances.
 3. Complete independent security review of the custom contracts and deployment parameters, establish the permitted wrapper distribution and issuer eligibility, and publish the immutable methodology/evidence.
 4. Fund and operate independent UMA proposal/dispute monitoring; test alerting and recovery before the first assertion. Public CLI reads alone are not a continuously running monitor.
 5. Re-run current source verification and read checks immediately before any deployment or bootstrap. Passing historical quotes does not reserve liquidity.
 
-No dedicated M7CAP/USDC liquidity pool is required. The ~$1,000 is seed backing; fees paid to existing pools, deployment gas, audits, monitoring, and oracle bonds are additional costs. The precision reserve permanently locks 10 of the initial 1,000 M7CAP shares (about $10 of a $1,000 seed). The reviewed bootstrap must hold at least 0.01 of every stock token to satisfy the minimum projected reserve of 10,000 raw units per stock. See the [internal audit](AUDIT.md) for the rounding fix and remaining findings.
+No dedicated M7CAP/USDC liquidity pool is required. The ~$1,000 is seed backing; fees paid to existing pools, deployment gas, audits, monitoring, and oracle bonds are additional costs. The precision reserve permanently locks 10 of the initial 1,000 M7CAP shares (about $10 of a $1,000 seed). The reviewed bootstrap must hold at least 0.01 of every stock token to satisfy the minimum projected reserve of 10,000 raw units per stock. See the [first](AUDIT.md) and [second](AUDIT-2.md) internal reviews for the findings, fixes and residual risks.

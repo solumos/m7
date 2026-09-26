@@ -22,10 +22,18 @@ contract Valuation {
     error OutsideExecutionWindow();
     error UnavailablePrice(uint256 index);
     error CorporateAction(uint256 index);
+    error NoFreshMarketSignal();
 
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
     // Base USDC/USD publishes on 0.3% deviation or a 24h heartbeat.
     uint256 public constant USDC_MAX_AGE = 25 hours;
+    // Stock feeds publish on a 0.5% deviation or a 24h heartbeat during market hours only.
+    uint256 public constant MAX_STOCK_AGE_LIMIT = 25 hours;
+    // At least one stock feed this fresh is evidence the US market is open (holidays fail closed).
+    uint256 public constant FRESH_SIGNAL_AGE = 1 hours;
+    // Weekdays 15:00-20:00 UTC fall inside regular US trading in both daylight-saving regimes.
+    uint256 public constant WINDOW_START = 15 hours;
+    uint256 public constant WINDOW_END = 20 hours;
     address[8] public assets;
     IAggregatorV3[8] public feeds;
     uint256[8] public tokenUnits;
@@ -42,8 +50,8 @@ contract Valuation {
         uint256 maxAge_
     ) {
         if (
-            address(sequencer_) == address(0) || address(registry_) == address(0) || maxAge_ == 0
-                || maxAge_ > 1 hours
+            address(sequencer_) == address(0) || address(registry_) == address(0)
+                || maxAge_ < FRESH_SIGNAL_AGE || maxAge_ > MAX_STOCK_AGE_LIMIT
         ) {
             revert InvalidConfiguration();
         }
@@ -65,13 +73,14 @@ contract Valuation {
         }
     }
 
-    /// @notice Fresh USD prices, 18 decimals per whole token, from one transaction snapshot.
-    /// @dev Weekdays 15:00-17:00 UTC overlap regular US trading in both DST regimes.
-    ///      Holidays fail closed through freshness checks; 24h heartbeats can restrict liveness.
+    /// @notice Valid USD prices, 18 decimals per whole token, from one transaction snapshot.
+    /// @dev Every stock price must be at most `maxAge` old (heartbeat liveness) and at least one must be at most
+    ///      `FRESH_SIGNAL_AGE` old (the market is trading). A quiet feed inside its 0.5% deviation band is still
+    ///      accurate, so it no longer blocks execution. Holidays fail closed unless a heartbeat lands on them.
     function snapshot() external view returns (uint256[8] memory prices) {
         uint256 dayOfWeek = (block.timestamp / 1 days + 4) % 7;
         uint256 timeOfDay = block.timestamp % 1 days;
-        if (dayOfWeek == 0 || dayOfWeek == 6 || timeOfDay < 15 hours || timeOfDay >= 17 hours) {
+        if (dayOfWeek == 0 || dayOfWeek == 6 || timeOfDay < WINDOW_START || timeOfDay >= WINDOW_END) {
             revert OutsideExecutionWindow();
         }
         (, int256 status, uint256 startedAt,,) = sequencer.latestRoundData();
@@ -80,6 +89,7 @@ contract Valuation {
                 || block.timestamp - startedAt <= SEQUENCER_GRACE_PERIOD
         ) revert SequencerUnavailable();
 
+        bool marketSignal;
         for (uint256 i; i < 8; ++i) {
             if (i < 7) {
                 (uint256 multiplier, bool paused) = registry.getOracleParams(assets[i]);
@@ -92,20 +102,23 @@ contract Valuation {
                     || updatedAt > block.timestamp
                     || block.timestamp - updatedAt > (i == 7 ? USDC_MAX_AGE : maxAge)
             ) revert UnavailablePrice(i);
+            if (i < 7 && block.timestamp - updatedAt <= FRESH_SIGNAL_AGE) marketSignal = true;
             prices[i] = Math.mulDiv(uint256(answer), 1e18, feedUnits[i]);
             // An out-of-range configured feed fails closed rather than overflowing later arithmetic.
             if (prices[i] == 0 || prices[i] > 1e36) revert UnavailablePrice(i);
         }
+        if (!marketSignal) revert NoFreshMarketSignal();
     }
 
-    /// @notice Convert raw token balances into 18-decimal USD values using supplied snapshot prices.
-    function values(address holder, uint256[8] memory prices)
+    /// @notice Convert raw token amounts into 18-decimal USD values using supplied snapshot prices.
+    /// @dev Takes explicit amounts so callers can exclude balances the vault owes to earlier redeemers.
+    function values(uint256[8] memory amounts, uint256[8] memory prices)
         external
         view
         returns (uint256[8] memory components, uint256 total)
     {
         for (uint256 i; i < 8; ++i) {
-            components[i] = Math.mulDiv(IERC20Metadata(assets[i]).balanceOf(holder), prices[i], tokenUnits[i]);
+            components[i] = Math.mulDiv(amounts[i], prices[i], tokenUnits[i]);
             total += components[i];
         }
     }

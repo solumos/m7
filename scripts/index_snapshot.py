@@ -63,6 +63,11 @@ def allocate(values):
     return floors
 
 
+def canonical_bytes(document):
+    """The exact bytes whose SHA-256 is asserted on chain: sorted keys, compact separators, UTF-8."""
+    return json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+
+
 def compile_snapshot(document):
     cutoff = instant(document['cutoff'])
     reference = instant(document['reference_at'])
@@ -129,7 +134,7 @@ def compile_snapshot(document):
             raise ValueError('Token reference price must equal held-class close times multiplier within 1e-8 USD')
         caps.append(cap)
         quantities.append(cap / token_price)
-    canonical = json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+    canonical = canonical_bytes(document)
     # Proposal happens in the following calendar quarter; Q4 naturally rolls into next year.
     proposal_quarter = cutoff.year * 4 + quarter + 1
     return {
@@ -147,9 +152,15 @@ def compile_snapshot(document):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('observations', type=Path)
+    p.add_argument('--canonical-out', type=Path,
+                   help='Also write the canonical observation bytes, so `sha256sum` reproduces observation_sha256')
     args = p.parse_args()
     try:
-        print(json.dumps(compile_snapshot(json.loads(args.observations.read_text())), indent=2))
+        document = json.loads(args.observations.read_text())
+        snapshot = compile_snapshot(document)
+        if args.canonical_out:
+            args.canonical_out.write_bytes(canonical_bytes(document))
+        print(json.dumps(snapshot, indent=2))
     except (ValueError, KeyError, TypeError, OSError) as exc:
         p.exit(1, 'Invalid observations: ' + str(exc) + '\n')
 

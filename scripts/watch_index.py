@@ -8,11 +8,13 @@ from pathlib import Path
 import sys
 
 from index_snapshot import SYMBOLS
-from verify_base import RPC, address
+from verify_base import RPC, address, bytes32_text
 
 
 STATUS = ('none', 'pending', 'accepted', 'rejected', 'executed')
 ZERO_ID = '0x' + '00' * 32
+IDENTIFIER = bytes32_text('ASSERT_TRUTH2')
+LIVENESS = 72 * 3600
 
 
 def uint(value, bits=256):
@@ -35,14 +37,15 @@ def ratios(values):
 
 
 def decode_proposal(values):
-    # proposal(bytes32) returns a fully static tuple: uint32, uint8, uint256[7].
-    if len(values) != 9:
+    # proposal(bytes32) returns a fully static tuple: uint32, uint8, uint256[7], bytes32.
+    if len(values) != 10:
         raise ValueError('Malformed proposal ABI response')
     quarter, status = uint(values[0], 32), uint(values[1], 8)
     if not 0 < status < len(STATUS):
         raise ValueError('Unknown or missing proposal status')
     return {'quarter_id': quarter, 'status': STATUS[status],
-            'quantity_ratios': [str(value) for value in ratios(values[2:])]}
+            'quantity_ratios': [str(value) for value in ratios(values[2:9])],
+            'observation_sha256': '0x' + format(uint(values[9]), '064x')}
 
 
 def decode_assertion(values):
@@ -56,11 +59,32 @@ def decode_assertion(values):
         uint(values[index], 160)
     for index in (6, 9):
         uint(values[index], 64)
-    return {'asserter': address(values[5]), 'asserted_at': values[6],
+    return {'asserting_caller': address(values[3]), 'escalation_manager': address(values[4]),
+            'asserter': address(values[5]), 'asserted_at': values[6],
             'settled': bool(values[7]), 'currency': address(values[8]),
             'challenge_expires_at': values[9], 'settlement_result': bool(values[10]),
-            'bond_raw': str(values[13]), 'disputer': address(values[15]),
-            'disputed': values[15] != 0}
+            'domain_id': values[11], 'identifier': values[12],
+            'bond_raw': str(values[13]), 'callback_recipient': address(values[14]),
+            'disputer': address(values[15]), 'disputed': values[15] != 0}
+
+
+def assertion_mismatches(assertion, controller, currency, bond_floor):
+    """The controller always asserts with these parameters; anything else needs investigation."""
+    expected = {
+        'identifier': IDENTIFIER, 'domain_id': 0,
+        'asserting_caller': controller.lower(), 'currency': currency.lower(),
+        'escalation_manager': address(0), 'callback_recipient': address(0),
+    }
+    found = []
+    for field, want in expected.items():
+        got = assertion[field].lower() if isinstance(assertion[field], str) else assertion[field]
+        if got != want:
+            found.append(field)
+    if assertion['challenge_expires_at'] - assertion['asserted_at'] != LIVENESS:
+        found.append('liveness')
+    if int(assertion['bond_raw']) < bond_floor:
+        found.append('bond')
+    return found
 
 
 def compare_snapshot(expected, proposal, quarter):
@@ -73,8 +97,10 @@ def compare_snapshot(expected, proposal, quarter):
     observed = ratios(proposal['quantity_ratios'])
     differences = [{'symbol': symbol, 'expected': str(want), 'asserted': str(got)}
                    for symbol, want, got in zip(SYMBOLS, expected_ratios, observed) if want != got]
+    expected_digest = str(expected.get('observation_sha256', '')).lower()
     return {'quarter_matches': expected_quarter == quarter == proposal['quarter_id'],
             'ratios_match': not differences, 'differences': differences,
+            'digest_matches': expected_digest == proposal['observation_sha256'],
             'expected_observation_sha256': expected.get('observation_sha256')}
 
 
@@ -86,8 +112,14 @@ def monitor(controller, rpc, expected=None):
         raise ValueError('Controller cannot be zero')
     quarter = uint(rpc.call(controller, 'currentQuarter()')[0], 32)
     last = uint(rpc.call(controller, 'lastExecutedQuarter()')[0], 32)
-    identifier = '0x' + format(uint(rpc.call(controller, 'quarterlyProposal(uint32)', quarter)[0]), '064x')
+    identifier = '0x' + format(uint(rpc.call(controller, 'latestProposal(uint32)', quarter)[0]), '064x')
+    accepted = '0x' + format(uint(rpc.call(controller, 'acceptedProposal(uint32)', quarter)[0]), '064x')
     oracle = address(uint(rpc.call(controller, 'oracle()')[0], 160))
+    currency = address(uint(rpc.call(controller, 'bondCurrency()')[0], 160))
+    bond_floor = uint(rpc.call(controller, 'bondFloor()')[0])
+    vault = address(uint(rpc.call(controller, 'vault()')[0], 160))
+    router = address(uint(rpc.call(vault, 'router()')[0], 160))
+    replaceable = bool(uint(rpc.call(controller, 'canPropose(uint32)', quarter)[0], 8))
     now = int(rpc.block['timestamp'], 16)
     report = {
         'controller': controller, 'chain_id': 8453,
@@ -95,7 +127,10 @@ def monitor(controller, rpc, expected=None):
         'block_timestamp': datetime.fromtimestamp(now, timezone.utc).isoformat(),
         'current_quarter': quarter, 'last_executed_quarter': last,
         'current_review_stale': last != quarter,
-        'assertion_id': identifier, 'uma_oracle': oracle, 'alerts': [],
+        'assertion_id': identifier, 'accepted_assertion_id': accepted,
+        'new_proposal_allowed': replaceable, 'uma_oracle': oracle,
+        # Harmless since the vault and gateway accept the router's refund; reported for visibility only.
+        'router_eth_wei': rpc.balance(router), 'alerts': [],
         'source_truth': 'Not verified. Independently review filings, corporate actions, prices, and methodology.',
         'evidence': 'Inspect controller Proposed and UMA AssertionMade events. No evidence URL is fetched.',
         'transactions_sent': False,
@@ -115,6 +150,9 @@ def monitor(controller, rpc, expected=None):
         assertion['challenge_expires_at'], timezone.utc).isoformat()
     if proposal['quarter_id'] != quarter:
         alerts.append('Controller current-quarter mapping points to a different proposal quarter.')
+    mismatches = assertion_mismatches(assertion, controller, currency, bond_floor)
+    if mismatches:
+        alerts.append('UNEXPECTED UMA ASSERTION PARAMETERS: ' + ', '.join(mismatches))
     if expected is None:
         alerts.append('No independently compiled expected snapshot supplied; asserted ratios require review.')
     else:
@@ -124,12 +162,18 @@ def monitor(controller, rpc, expected=None):
             alerts.append('Expected snapshot is not for this proposal and current quarter.')
         if not comparison['ratios_match']:
             alerts.append('ASSERTED RATIOS DIFFER FROM EXPECTED SNAPSHOT; independently review before challenge expiry.')
+        if not comparison['digest_matches']:
+            alerts.append('ASSERTED OBSERVATION DIGEST DIFFERS FROM EXPECTED SNAPSHOT.')
     status = proposal['status']
     if status == 'pending':
+        payee = assertion['disputer'] if assertion['disputed'] else assertion['asserter']
+        if uint(rpc.call(currency, 'isBlacklisted(address)', int(payee, 16))[0], 8):
+            alerts.append('UNSETTLEABLE ASSERTION: the bond currency refuses payment to ' + payee
+                          + '; it never blocks the quarter, so submit a replacement proposal if needed.')
         if assertion['settled']:
             alerts.append('UMA settled externally; controller.settle still needs to record the result.')
         elif assertion['disputed']:
-            alerts.append('UMA assertion is disputed and cannot execute before a truthful final resolution.')
+            alerts.append('UMA assertion is disputed; it does not block a replacement proposal.')
         elif assertion['challenge_expires_at'] <= now:
             alerts.append('Undisputed challenge window closed; settlement is available.')
         else:
@@ -138,6 +182,8 @@ def monitor(controller, rpc, expected=None):
         alerts.append('Assertion was rejected; a corrected bonded proposal may be submitted this quarter.')
     elif status == 'accepted':
         alerts.append('Accepted assertion awaits permissionless execution within the valuation safety gates.')
+    if replaceable and accepted == ZERO_ID and status == 'pending':
+        alerts.append('A replacement proposal is currently allowed for this quarter.')
     if status in ('accepted', 'executed') and not (assertion['settled'] and assertion['settlement_result']):
         alerts.append('INCONSISTENT STATE: accepted proposal lacks a settled truthful UMA assertion.')
     if status == 'executed' and last != quarter:

@@ -1,93 +1,98 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {Test} from "forge-std/Test.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {M7CapVault} from "../src/M7CapVault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
 import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
 import {VaultTestToken, VaultTestRouter} from "./M7CapVault.t.sol";
 import {GatewayFactory, GatewayRouter} from "./mocks/GatewayMocks.sol";
+import {B20LikeToken, PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
+import {VaultHarness} from "./mocks/VaultHarness.sol";
 
-/// @dev Models address-specific sender and receiver policy, not a legal eligibility determination.
-contract AuditPolicyToken is ERC20 {
-    uint8 private immutable _decimals;
-    address public excluded;
+/// @dev First-review reproductions, converted to regressions after the fixes (docs/AUDIT.md).
+contract AuditVaultGatewayTest is VaultHarness {
+    uint64 constant POLICY = 5;
 
-    constructor(uint8 decimals_) ERC20("Policy token", "POL") {
-        _decimals = decimals_;
-    }
-
-    function decimals() public view override returns (uint8) {
-        return _decimals;
-    }
-
-    function mint(address recipient, uint256 amount) external {
-        _mint(recipient, amount);
-    }
-
-    function setExcluded(address account) external {
-        excluded = account;
-    }
-
-    function _update(address from, address to, uint256 amount) internal override {
-        require(excluded == address(0) || (from != excluded && to != excluded), "address excluded");
-        super._update(from, to, amount);
-    }
-}
-
-/// @dev Audit reproduction only; no production behavior is changed.
-contract AuditVaultGatewayTest is Test {
-    function testAuditStockAddressExclusionDoesNotPropagateToGatewayUser() public {
+    // D-02 regression: a stock's address policy now applies to M7CAP holders on every path.
+    function testStockAddressExclusionPropagatesToReceiptHolders() public {
+        PolicyRegistryMock registry = new PolicyRegistryMock();
         IERC20[8] memory tokens;
         uint256[8] memory seed;
-        int24[7] memory routes;
-        address excludedUser = address(0xa11ce);
         for (uint256 i; i < 8; ++i) {
-            tokens[i] = new AuditPolicyToken(i == 7 ? 6 : 8);
-            AuditPolicyToken(address(tokens[i])).mint(address(this), 1_000e8);
-            if (i < 7) {
-                seed[i] = 10e8;
-                routes[i] = 10;
-            }
+            tokens[i] = new B20LikeToken(i == 7 ? 6 : 8, registry);
+            B20LikeToken(address(tokens[i])).mint(address(this), 1_000e8);
+            if (i < 7) seed[i] = 10e8;
         }
+        B20LikeToken stock = B20LikeToken(address(tokens[0]));
+        stock.setPolicyId(stock.TRANSFER_SENDER_POLICY(), POLICY);
+        stock.setPolicyId(stock.TRANSFER_RECEIVER_POLICY(), POLICY);
+        stock.setPolicyId(stock.TRANSFER_EXECUTOR_POLICY(), POLICY);
         GatewayFactory factory = new GatewayFactory();
         GatewayRouter router = new GatewayRouter(address(factory), address(tokens[7]));
-        M7CapVault vault = new M7CapVault(tokens, address(this), router, factory, address(this));
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), router, factory);
+        for (uint256 i; i < 7; ++i) {
+            factory.setPool(address(tokens[i]), address(tokens[7]), 10, address(router));
+        }
+        (M7CapVault vault,) = _deployVault(tokens, _spacings(10), router, factory, registry);
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), address(this));
+        gateway.setFee(0);
         for (uint256 i; i < 8; ++i) {
-            AuditPolicyToken(address(tokens[i])).mint(address(router), 1_000e8);
+            B20LikeToken(address(tokens[i])).mint(address(router), 1_000e8);
             tokens[i].approve(address(vault), type(uint256).max);
-            if (i < 7) {
-                factory.setPool(address(tokens[i]), address(tokens[7]), 10, address(router));
-            }
         }
         vault.bootstrap(seed, address(this));
-        AuditPolicyToken(address(tokens[0])).setExcluded(excludedUser);
 
-        // The stock's own receiver policy rejects delivery to this user.
-        vm.expectRevert("address excluded");
-        tokens[0].transfer(excludedUser, 1);
+        address excluded = address(0xa11ce);
+        registry.setBlocked(POLICY, excluded, true);
+        vm.expectRevert("policy forbids");
+        tokens[0].transfer(excluded, 1);
 
-        // Nevertheless, the user can acquire the stock's pooled exposure with USDC.
-        AuditPolicyToken(address(tokens[7])).mint(excludedUser, 100e6);
-        vm.startPrank(excludedUser);
+        // Formerly the excluded user bought ten M7CAP with USDC; now the receipt cannot be issued to them.
+        B20LikeToken(address(tokens[7])).mint(excluded, 100e6);
+        vm.startPrank(excluded);
         tokens[7].approve(address(gateway), 1e6);
-        assertEq(gateway.mintWithUSDC(10e18, 1e6, excludedUser, block.timestamp, routes), 0.7e6);
-        assertEq(vault.balanceOf(excludedUser), 10e18);
-        assertEq(tokens[0].balanceOf(excludedUser), 0);
-
-        uint256[8] memory amounts = vault.quoteRedeem(10e18);
-        vm.expectRevert("address excluded");
-        vault.redeemBasket(10e18, amounts, excludedUser, block.timestamp);
-
-        // The gateway is the B20 sender/receiver, so the excluded user can still cash out.
-        vault.approve(address(gateway), 10e18);
-        assertEq(gateway.redeemToUSDC(10e18, 0.7e6, excludedUser, block.timestamp, routes), 0.7e6);
-        assertEq(tokens[7].balanceOf(excludedUser), 100e6);
-        assertEq(vault.balanceOf(excludedUser), 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.receiverScope(), excluded)
+        );
+        gateway.mintWithUSDC(10e18, 1e6, excluded, block.timestamp);
         vm.stopPrank();
+        vm.expectRevert(
+            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.receiverScope(), excluded)
+        );
+        vault.transfer(excluded, 1e18);
+
+        // A holder who becomes excluded can neither sell through the gateway nor redirect the stock elsewhere.
+        address holder = address(0xb0b);
+        require(vault.transfer(holder, 20e18));
+        registry.setBlocked(POLICY, holder, true);
+        vm.startPrank(holder);
+        vault.approve(address(gateway), 10e18);
+        vm.expectRevert(
+            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
+        );
+        gateway.redeemToUSDC(10e18, 0, holder, block.timestamp);
+        uint256[8] memory noMinimum;
+        vm.expectRevert(
+            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
+        );
+        vault.redeemBasket(10e18, noMinimum, address(0xca11), block.timestamp);
+
+        // The resilient exit still releases the six healthy stocks and keeps the blocked one as the holder's claim.
+        (uint256[8] memory delivered, uint256[8] memory deferred) =
+            vault.redeemBasketWithClaims(10e18, noMinimum, address(0xca11), block.timestamp);
+        assertEq(delivered[0], 0);
+        assertEq(deferred[0], 0.1e8);
+        assertEq(tokens[1].balanceOf(address(0xca11)), delivered[1]);
+        assertGt(delivered[1], 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
+        );
+        vault.withdrawClaim(0, deferred[0], address(0xca11));
+        vm.stopPrank();
+        registry.setBlocked(POLICY, holder, false);
+        vm.prank(holder);
+        vault.withdrawClaim(0, deferred[0], address(0xca11));
+        assertEq(tokens[0].balanceOf(address(0xca11)), deferred[0]);
     }
 
     function testRegressionAllCirculatingSharesRedeemedAndRefilledPreservesBasket() public {
@@ -99,7 +104,7 @@ contract AuditVaultGatewayTest is Test {
             if (i < 7) seed[i] = (i + 1) * 1e8;
         }
         VaultTestRouter router = new VaultTestRouter();
-        M7CapVault vault = new M7CapVault(tokens, address(this), router, router, address(this));
+        (M7CapVault vault,) = _deployVault(tokens, _spacings(10), router, router, new PolicyRegistryMock());
         for (uint256 i; i < 8; ++i) {
             tokens[i].approve(address(vault), type(uint256).max);
         }
