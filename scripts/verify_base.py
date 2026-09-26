@@ -141,6 +141,13 @@ def uma_preflight(rpc, manifest):
     }
 
 
+def registry_answers_policy_zero(rpc, registry, accounts):
+    """The vault constructor requires isAuthorized(0, vault) to answer true; so must every planned account."""
+    rejected = [a for a in accounts if rpc.call(registry, 'isAuthorized(uint64,address)', 0, a)[0] != 1]
+    if rejected:
+        raise ValueError('Policy registry rejects policy 0 for ' + ', '.join(rejected))
+
+
 def verify(manifest, rpc_url, snapshot=None, accounts=()):
     rpc = RPC(rpc_url)
     now = int(rpc.block['timestamp'], 16)
@@ -180,6 +187,8 @@ def verify(manifest, rpc_url, snapshot=None, accounts=()):
         actual = address(rpc.call(venue[name], 'factory()')[0])
         require(actual.lower() == venue['factory'].lower(), name + ' factory mismatch')
     report['router_factory_match'] = True
+    registry_answers_policy_zero(rpc, manifest['policy_registry'], [venue['router'], *accounts])
+    report['policy_zero_authorized'] = True
 
     def stock_check(stock):
         token = stock['address']
@@ -266,13 +275,15 @@ def main():
     p.add_argument('--rpc', default=os.environ.get('BASE_RPC_URL', 'https://base-rpc.publicnode.com'))
     p.add_argument('--snapshot', type=Path, help='Optional output of index_snapshot.py; otherwise equal-dollar liquidity probes')
     p.add_argument('--account', action='append', default=[], help='Also check planned vault/gateway/holder addresses against B20 policies')
+    p.add_argument('--reads-only', action='store_true',
+                   help='Exit 0 when every read check passes, even outside the rebalance window (for monitoring)')
     args = p.parse_args()
     try:
         result = verify(json.loads(args.manifest.read_text()), args.rpc,
                         json.loads(args.snapshot.read_text()) if args.snapshot else None, args.account)
         print(json.dumps(result, indent=2))
         # Passing a read check never grants production approval. Stale feed => fail closed for rebalance preflight.
-        return 0 if result['rebalance_oracles_currently_usable'] else 1
+        return 0 if args.reads_only or result['rebalance_oracles_currently_usable'] else 1
     except Exception as exc:
         print(json.dumps({'read_checks_passed': False, 'launch_ready': False, 'error': str(exc)}, indent=2))
         return 1

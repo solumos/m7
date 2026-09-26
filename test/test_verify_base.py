@@ -84,6 +84,19 @@ class RebalanceOracleRuleTests(unittest.TestCase):
     def usable(self, now, stock_ages, usdc_age=3600):
         return preflight.rebalance_oracles_usable(now, stock_ages, usdc_age, self.RISK)
 
+    def test_policy_zero_must_authorize_every_planned_account(self):
+        class Registry:
+            def __init__(self, rejected):
+                self.rejected = rejected
+
+            def call(self, target, signature, *args):
+                assert signature == 'isAuthorized(uint64,address)' and args[0] == 0
+                return [int(args[1] not in self.rejected)]
+
+        preflight.registry_answers_policy_zero(Registry(()), '0xregistry', ['0xvault', '0xgateway'])
+        with self.assertRaisesRegex(ValueError, '0xvault'):
+            preflight.registry_answers_policy_zero(Registry(('0xvault',)), '0xregistry', ['0xvault'])
+
     def test_quiet_feeds_pass_while_one_stock_is_fresh(self):
         ok, checks = self.usable(self.MONDAY_1600, [60] + [89_000] * 6)
         self.assertTrue(ok)

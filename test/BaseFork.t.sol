@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {M7CapVault} from "../src/M7CapVault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
 import {IndexController} from "../src/IndexController.sol";
@@ -149,6 +150,75 @@ contract BaseForkTest is VaultHarness {
         emit log_named_uint("Local assertion USDC bond refunded (6 decimals)", bond);
     }
 
+    /// @dev The on-chain planner against the live pinned pools with native B20 transfers: a real UMA acceptance, then
+    ///      one bounded step. Feeds are mocked only to report their fork-time answers as fresh after the time travel.
+    function testBaseNativeRebalanceAgainstLivePools() public {
+        _startFork();
+        IndexController controller = _deployFixtureController();
+        M7CapVault vault = M7CapVault(payable(address(controller.vault())));
+        vault.bootstrap(_buySeed(vault, 150e6), address(this));
+        uint256[7] memory ratios = _oneStepAway(_backing(vault));
+
+        uint256 execution = _executionTime(controller);
+        vm.warp(execution - 73 hours);
+        bytes32 assertionId = _proposeLive(controller, ratios);
+        vm.warp(execution - 1 hours);
+        assertTrue(controller.settle(assertionId));
+        vm.warp(execution);
+        _reportFeedsFresh(controller.valuation());
+
+        vm.recordLogs();
+        uint256 gasBefore = gasleft();
+        controller.execute(block.timestamp + 1 hours);
+        emit log_named_uint("Rebalance execute gas", gasBefore - gasleft());
+        (uint256 navBefore, uint256 navAfter, uint256 sold, uint256 bought, uint256 legs) =
+            _rebalanced(vm.getRecordedLogs());
+        assertTrue(controller.executedQuarter(controller.currentQuarter()));
+        assertGt(sold, 0);
+        assertGt(bought, 0);
+        assertLe(navBefore - Math.min(navBefore, navAfter), (sold + bought) / 100, "loss beyond 1% of traded");
+        uint256[7] memory shares = _shares(_backing(vault));
+        for (uint256 i; i < 7; ++i) {
+            assertApproxEqRel(shares[i], ratios[i], 0.003e18, "outside the 30 bp compliance band");
+        }
+        assertLe(vault.backing(7), Math.max(navAfter / 10_000 / 1e12, controller.MIN_LEG_USDC()));
+        emit log_named_uint("Rebalance legs", legs);
+        emit log_named_uint("NAV before (1e18 USD)", navBefore);
+        emit log_named_uint("NAV after (1e18 USD)", navAfter);
+        emit log_named_uint("Sold value (1e18 USD)", sold);
+        emit log_named_uint("Bought value (1e18 USD)", bought);
+    }
+
+    /// @dev Receipt transfers and the resilient exit against the real policy registry and native stock transfers.
+    function testBaseNativeTransferGasAndResilientRedemption() public {
+        _startFork();
+        IndexController controller = _deployFixtureController();
+        M7CapVault vault = M7CapVault(payable(address(controller.vault())));
+        vault.bootstrap(_buySeed(vault, 50e6), address(this));
+        address holder = makeAddr("Base fork holder");
+        address receiver = makeAddr("Base fork receiver");
+
+        uint256 gasBefore = gasleft();
+        require(vault.transfer(holder, 100e18));
+        emit log_named_uint("M7CAP transfer gas, new recipient", gasBefore - gasleft());
+        gasBefore = gasleft();
+        require(vault.transfer(holder, 1e18));
+        emit log_named_uint("M7CAP transfer gas, existing recipient", gasBefore - gasleft());
+
+        uint256[8] memory quote = vault.quoteRedeem(50e18);
+        uint256[8] memory noMinimum;
+        vm.prank(holder);
+        (uint256[8] memory delivered, uint256[8] memory deferred) =
+            vault.redeemBasketWithClaims(50e18, noMinimum, receiver, block.timestamp);
+        for (uint256 i; i < 8; ++i) {
+            assertEq(delivered[i], quote[i]);
+            assertEq(deferred[i], 0);
+            assertEq(vault.assets(i).balanceOf(receiver), quote[i]);
+            assertEq(vault.reserved(i), 0);
+        }
+        assertEq(vault.balanceOf(holder), 51e18);
+    }
+
     function _deployFixtureController() private returns (IndexController controller) {
         string memory manifest = vm.readFile("config/base.json");
         IERC20[8] memory assets;
@@ -192,6 +262,124 @@ contract BaseForkTest is VaultHarness {
             address(this)
         );
         assertEq(address(vault), predictedVault);
+    }
+
+    /// @dev Buys `usdcPerStock` of each stock from its pinned pool and approves the vault to take it.
+    function _buySeed(M7CapVault vault, uint256 usdcPerStock) private returns (uint256[8] memory seed) {
+        IERC20 usdc = vault.assets(7);
+        ISlipstreamRouter router = vault.router();
+        deal(address(usdc), address(this), usdcPerStock * 7);
+        usdc.forceApprove(address(router), usdcPerStock * 7);
+        for (uint256 i; i < 7; ++i) {
+            seed[i] = router.exactInputSingle(
+                ISlipstreamRouter.ExactInputSingleParams({
+                    tokenIn: address(usdc),
+                    tokenOut: address(vault.assets(i)),
+                    tickSpacing: vault.tickSpacing(i),
+                    recipient: address(this),
+                    deadline: block.timestamp,
+                    amountIn: usdcPerStock,
+                    amountOutMinimum: 1,
+                    sqrtPriceLimitX96: 0
+                })
+            );
+            vault.assets(i).forceApprove(address(vault), seed[i]);
+        }
+        usdc.forceApprove(address(router), 0);
+    }
+
+    function _backing(M7CapVault vault) private view returns (uint256[8] memory held) {
+        for (uint256 i; i < 8; ++i) {
+            held[i] = vault.backing(i);
+        }
+    }
+
+    function _shares(uint256[8] memory held) private pure returns (uint256[7] memory shares) {
+        uint256 total;
+        for (uint256 i; i < 7; ++i) {
+            total += held[i];
+        }
+        for (uint256 i; i < 7; ++i) {
+            shares[i] = held[i] * 1e18 / total;
+        }
+    }
+
+    /// @dev Current quantity shares with the first stock 3% heavier and the second 3% lighter: within one step.
+    function _oneStepAway(uint256[8] memory held) private pure returns (uint256[7] memory ratios) {
+        uint256[7] memory quantities;
+        uint256 total;
+        for (uint256 i; i < 7; ++i) {
+            quantities[i] = held[i];
+        }
+        quantities[0] = quantities[0] * 103 / 100;
+        quantities[1] = quantities[1] * 97 / 100;
+        for (uint256 i; i < 7; ++i) {
+            total += quantities[i];
+        }
+        uint256 assigned;
+        for (uint256 i; i < 6; ++i) {
+            ratios[i] = quantities[i] * 1e18 / total;
+            assigned += ratios[i];
+        }
+        ratios[6] = 1e18 - assigned;
+    }
+
+    /// @dev First weekday 16:00 UTC at least 88 hours ahead whose proposal time, 73 hours earlier, is in the same
+    ///      quarter: proposal, settlement and execution must share one quarter.
+    function _executionTime(IndexController controller) private view returns (uint256 t) {
+        t = (block.timestamp / 1 days + 4) * 1 days + 16 hours;
+        while (true) {
+            uint256 dayOfWeek = (t / 1 days + 4) % 7;
+            if (
+                dayOfWeek != 0 && dayOfWeek != 6
+                    && controller.quarterAt(t - 73 hours) == controller.quarterAt(t)
+            ) {
+                return t;
+            }
+            t += 1 days;
+        }
+    }
+
+    function _proposeLive(IndexController controller, uint256[7] memory ratios) private returns (bytes32) {
+        IERC20 usdc = controller.bondCurrency();
+        controller.oracle().syncUmaParams(controller.ASSERTION_IDENTIFIER(), address(usdc));
+        uint256 bond = Math.max(controller.bondFloor(), controller.oracle().getMinimumBond(address(usdc)));
+        address proposer = makeAddr("Local fork rebalance proposer");
+        deal(address(usdc), proposer, bond);
+        vm.startPrank(proposer);
+        usdc.forceApprove(address(controller), bond);
+        bytes32 assertionId = controller.propose(
+            controller.currentQuarter(), ratios, "ipfs://local-fork-fixture", sha256(bytes(FIXTURE))
+        );
+        vm.stopPrank();
+        return assertionId;
+    }
+
+    /// @dev After time travel, report each feed's fork-time answer as updated now. Prices are not changed.
+    function _reportFeedsFresh(Valuation valuation) private {
+        for (uint256 i; i < 8; ++i) {
+            IAggregatorV3 feed = valuation.feeds(i);
+            (, int256 answer,,,) = feed.latestRoundData();
+            vm.mockCall(
+                address(feed),
+                abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector),
+                abi.encode(uint80(1), answer, block.timestamp, block.timestamp, uint80(1))
+            );
+        }
+    }
+
+    function _rebalanced(Vm.Log[] memory logs)
+        private
+        pure
+        returns (uint256 navBefore, uint256 navAfter, uint256 sold, uint256 bought, uint256 legs)
+    {
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == M7CapVault.RebalanceLeg.selector) ++legs;
+            if (logs[i].topics[0] == IndexController.Rebalanced.selector) {
+                (navBefore, navAfter,, sold, bought) =
+                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256));
+            }
+        }
     }
 
     function _manifestSpacings(string memory manifest) private pure returns (int24[7] memory spacings) {
