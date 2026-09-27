@@ -45,7 +45,7 @@ Residual risks after remediation:
 - **Governance:** a false unchallenged assertion can still move composition one step per quarter, and the bond is fixed.
 - **Claims:** claims on frozen or seized assets may never pay out, and they are senior to holders under seizure.
 - **Eligibility:** policy mirroring means a stock-wide freeze or an allowlist switch also freezes M7CAP transfers, including M7CAP held in DeFi.
-- **Fee owner:** the gateway now has an owner who can set a fee of at most 10 bp and claim fees charged.
+- **Fee owner:** removed. The gateway briefly had an owner who could set a fee of at most 10 bp; the fee and the owner were taken out before deployment, so no contract has an owner.
 
 Native B20 behavior of the new code has since been tested against live Base under both Beryl and Cobalt rules, including registry lookups and their gas and a rebalance through the live pools (see [INTEGRATION.md](INTEGRATION.md)).
 

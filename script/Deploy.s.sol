@@ -36,8 +36,6 @@ contract Deploy is Script {
         require(block.chainid == vm.parseJsonUint(config, ".chain_id"), "wrong chain");
         address deployer = vm.envAddress("DEPLOYER");
         require(deployer != address(0), "missing deployer");
-        address feeOwner = vm.envOr("FEE_OWNER", deployer);
-        if (feeOwner == address(0)) feeOwner = deployer; // the example environment leaves it zero
         string memory methodologyURI = vm.envString("METHODOLOGY_URI");
         bytes memory methodology = bytes(vm.readFile("docs/METHODOLOGY.md"));
         // The URI is immutable and printed in every claim, which is false if the document is not at that location.
@@ -65,16 +63,15 @@ contract Deploy is Script {
             c.assets, c.spacings, address(controller), c.router, c.factory, c.policyRegistry, deployer
         );
         require(address(vault) == predictedVault, "CREATE nonce mismatch");
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), feeOwner);
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
         vm.stopBroadcast();
 
         require(
             address(controller.vault()) == address(vault) && vault.controller() == address(controller), "link"
         );
-        require(address(gateway.vault()) == address(vault) && gateway.owner() == feeOwner, "gateway");
+        require(address(gateway.vault()) == address(vault), "gateway");
         console2.log("Vault", address(vault));
         console2.log("Gateway", address(gateway));
-        console2.log("Gateway fee owner", feeOwner);
         console2.log("Controller", address(controller));
         console2.log("Valuation", address(valuation));
         console2.log("Methodology keccak256:");

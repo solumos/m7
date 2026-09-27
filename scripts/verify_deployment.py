@@ -18,7 +18,6 @@ from verify_base import RPC, address, keccak_text
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ('Valuation', 'IndexController', 'M7CapVault', 'USDCGateway')
-ZERO = '0x' + '00' * 20
 SEED_LOCK = '0x' + '00' * 19 + '01'
 WAD = 10**18
 
@@ -53,9 +52,8 @@ def compare_bytecode(onchain_hex, artifact):
 
 
 def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
-    """`addresses` maps each contract name to its lowercase address. `expected` holds deployer, fee_owner,
-    bond_floor, fee_bps, methodology (bytes) and optionally methodology_uri. `seed` switches to the post-bootstrap
-    checks."""
+    """`addresses` maps each contract name to its lowercase address. `expected` holds deployer, bond_floor,
+    methodology (bytes) and optionally methodology_uri. `seed` switches to the post-bootstrap checks."""
     report = {'block': int(rpc.block['number'], 16), 'contracts': addresses, 'checks': [], 'failures': []}
 
     def check(name, actual, wanted):
@@ -126,9 +124,6 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
     check('gateway vault', addr(gateway, 'vault()'), vault)
     check('gateway router', addr(gateway, 'router()'), venue['router'].lower())
     check('gateway usdc', addr(gateway, 'usdc()'), assets[7])
-    check('gateway owner', addr(gateway, 'owner()'), expected['fee_owner'])
-    check('gateway pending owner', addr(gateway, 'pendingOwner()'), ZERO)
-    check('gateway fee bps', num(gateway, 'feeBps()'), expected['fee_bps'])
 
     if seed is None:
         check('vault is unseeded', num(vault, 'totalSupply()'), 0)
@@ -186,9 +181,7 @@ def main():
     p.add_argument('--methodology', type=Path, default=ROOT / 'docs/METHODOLOGY.md')
     p.add_argument('--artifacts', type=Path, default=ROOT / 'out', help='Build output to compare bytecode against')
     p.add_argument('--no-bytecode', action='store_true', help='Skip the runtime bytecode comparison')
-    p.add_argument('--fee-owner', default=os.environ.get('FEE_OWNER'))
     p.add_argument('--bond-floor', type=int, default=int(os.environ.get('BOND_FLOOR_USDC') or 1_000 * 10**6))
-    p.add_argument('--fee-bps', type=int, default=1)
     p.add_argument('--methodology-uri', default=os.environ.get('METHODOLOGY_URI'))
     p.add_argument('--bootstrapped', action='store_true', help='Also check the state right after Bootstrap.s.sol')
     p.add_argument('--seed', type=Path, default=ROOT / os.environ.get('SEED_FILE', 'config/seed.json'))
@@ -198,10 +191,8 @@ def main():
     try:
         manifest = json.loads(args.manifest.read_text())
         contracts, deployer = from_broadcast(args.broadcast)
-        fee_owner = args.fee_owner if args.fee_owner and int(args.fee_owner, 16) else deployer
-        expected = {'deployer': deployer, 'fee_owner': fee_owner.lower(), 'bond_floor': args.bond_floor,
-                    'fee_bps': args.fee_bps, 'methodology': args.methodology.read_bytes(),
-                    'methodology_uri': args.methodology_uri}
+        expected = {'deployer': deployer, 'bond_floor': args.bond_floor,
+                    'methodology': args.methodology.read_bytes(), 'methodology_uri': args.methodology_uri}
         artifacts = None if args.no_bytecode else {
             name: json.loads((args.artifacts / (name + '.sol') / (name + '.json')).read_text()) for name in CONTRACTS}
         seed = json.loads(args.seed.read_text()) if args.bootstrapped else None
@@ -220,7 +211,7 @@ def main():
         methodology = expected['methodology']
         record = {
             'chain_id': 8453, 'verified_at_block': report['block'], 'commit': commit, 'working_tree_dirty': dirty,
-            'toolchain': toolchain(), 'deployer': deployer, 'fee_owner': expected['fee_owner'],
+            'toolchain': toolchain(), 'deployer': deployer,
             'bond_floor_usdc_raw': str(args.bond_floor), 'contracts': contracts,
             'methodology': {'uri': 'ipfs://' + raw_cid(methodology),
                             'keccak256': '0x' + format(keccak_text(methodology.decode('utf-8')), '064x')},

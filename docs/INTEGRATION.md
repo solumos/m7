@@ -65,17 +65,17 @@ Registry pauses and sequencer outages are not replayed. [Feed behavior](https://
 
 ## Native Base fork tests
 
-`test/BaseFork.t.sol` runs the current contracts against live Base state with native B20 execution. On 2026-09-26 all four tests passed with base-anvil `nightly-98e7839c65f6` (base/base `3eb4817`, binaries checked with `gh attestation verify`), under both precompile rule sets: Beryl, which mainnet runs until 2026-09-30 18:00 UTC, and Cobalt after that. Figures below are from the Cobalt run at block **51,837,598**. Each test creates USDC only in local fork storage and acquires every B20 through its actual Slipstream pool. No B20 balance or code is fabricated, and nothing is broadcast.
+`test/BaseFork.t.sol` runs the current contracts against live Base state with native B20 execution. On 2026-09-27 all four tests passed with base-anvil `nightly-98e7839c65f6` (base/base `3eb4817`, binaries checked with `gh attestation verify`), under both precompile rule sets: Beryl, which mainnet runs until 2026-09-30 18:00 UTC, and Cobalt after that. Figures below are from the Cobalt run at block **51,869,461**. Each test creates USDC only in local fork storage and acquires every B20 through its actual Slipstream pool. No B20 balance or code is fabricated, and nothing is broadcast.
 
-- **Round trip** (`testBaseNativeB20BootstrapAndUSDCRoundTrip`). A seed of 100 USDC per stock, an equal-dollar fixture, bootstrapped the vault. The gateway, at its default 1 bp fee, minted 100 M7CAP for **70.007031 USDC** and redeemed them for **69.923007 USDC**. Assertions cover shares, refunds, the vault's backing, the gateway holding only its fees, and cleared allowances.
+- **Round trip** (`testBaseNativeB20BootstrapAndUSDCRoundTrip`). A seed of 100 USDC per stock, an equal-dollar fixture, bootstrapped the vault. The fee-free gateway minted 100 M7CAP for **70.000037 USDC** and redeemed them for **69.929990 USDC**; the difference is pool pricing. Assertions cover shares, refunds, the vault's backing, the gateway holding nothing afterwards, and cleared allowances.
 - **UMA** (`testBaseLiveUMAAssertionAndBondRefund`). The deployed OOv3 with `ASSERT_TRUTH2`: a 500 USDC minimum and 1,000 USDC supplied bond, the 72-hour window, early settlement refused, permissionless acceptance after time travel, and a full bond refund. There are no oracle mocks or whitelist changes, and the claim is a labelled fixture.
-- **Rebalance** (`testBaseNativeRebalanceAgainstLivePools`). A real UMA acceptance of ratios one step from the seed, then `execute` through the live pinned pools. Feeds are mocked only to report their fork-time answers as fresh after the time travel. It made two legs of about $4.50 each, used 562k gas, lost nothing in NAV, and met the 30 bp compliance and cash bounds.
+- **Rebalance** (`testBaseNativeRebalanceAgainstLivePools`). A real UMA acceptance of ratios one step from the seed, then `execute` through the live pinned pools. Feeds are mocked only to report their fork-time answers as fresh after the time travel. It made two legs of about $4.50 each, used 563k gas, lost nothing in NAV, and met the 30 bp compliance and cash bounds.
 - **Policies and exits** (`testBaseNativeTransferGasAndResilientRedemption`). M7CAP transfers against the real policy registry cost about 52k gas to a new holder and 28k to an existing one. These are measured inside one test transaction; a standalone transfer also pays cold account access. `redeemBasketWithClaims` delivered every leg, with no claims.
 
 `script/rehearse.sh` also ran the mainnet runbook end to end on a local base-anvil fork under both rule sets:
-- deploy, and 68 deployment checks with bytecode matching the build;
-- the seed bought for 998.98 USDC against a $1,000 oracle value;
-- bootstrap, and 88 post-bootstrap checks;
+- deploy, and 65 deployment checks with bytecode matching the build;
+- the seed bought for 999.84 USDC against a $1,000 oracle value;
+- bootstrap, and 85 post-bootstrap checks;
 - gateway and in-kind smoke tests;
 - a fixture proposal, 72 hours of time travel, settlement, and the monitor.
 

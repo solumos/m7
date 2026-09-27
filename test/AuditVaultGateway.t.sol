@@ -34,8 +34,7 @@ contract AuditVaultGatewayTest is VaultHarness {
             factory.setPool(address(tokens[i]), address(tokens[7]), 10, address(router));
         }
         (M7CapVault vault,) = _deployVault(tokens, _spacings(10), router, factory, registry);
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), address(this));
-        gateway.setFee(0);
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             B20LikeToken(address(tokens[i])).mint(address(router), 1_000e8);
             tokens[i].approve(address(vault), type(uint256).max);

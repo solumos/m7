@@ -2,7 +2,7 @@
 
 This runbook deploys M7CAP to Base mainnet, seeds it, runs the first quarterly cycle and keeps it monitored. Each step gives the command, what a good result looks like, and when to stop.
 
-The vault and controller are immutable and have no owner. Nothing can pause, cap or upgrade them. A mistake after the bootstrap means a new deployment and asking holders to migrate. Only the gateway has an owner, and it can only set a 0–10 bp USDC fee and claim fees already charged. The contracts have not had an independent audit; launching without one is the owner's decision. Say so wherever the deployment is announced.
+None of the four contracts has an owner, and none charges a fee. Nothing can pause, cap or upgrade them. A mistake after the bootstrap means a new deployment and asking holders to migrate. The contracts have not had an independent audit; launching without one is the owner's decision. Say so wherever the deployment is announced.
 
 ## Roles and funding
 
@@ -11,7 +11,7 @@ Every mainnet transaction is signed by the role's owner with a hardware wallet o
 | Role | Holds | Authority |
 |---|---|---|
 | Deployer, a fresh EOA used for nothing else until the deploy | about 0.01 ETH and the seed's USDC budget (about 1,030 USDC for a $1,000 seed) | Deploys the four contracts and calls `bootstrap` once; none afterwards |
-| Safe on Base, e.g. 2-of-3 | the 990 unlocked seed shares, and later the fees it claims | Gateway fee owner: `setFee(0..10)` and `claimFees` |
+| Seed receiver, e.g. a 2-of-3 Safe on Base | the 990 unlocked seed shares | None: an ordinary holder |
 | Proposer | the UMA bond (at least 1,000 USDC, refunded 72 hours after an undisputed proposal) and gas | None: anyone may propose |
 | Dispute wallet | at least one bond in USDC and gas, reachable during every challenge window from Oct 1 | None: anyone may dispute |
 | Settler and executor | gas | None: anyone may settle or execute |
@@ -102,7 +102,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    Every gateway must report `identical bytes`. Set `METHODOLOGY_URI` to the printed URI. A claim is false if the document is unavailable, so keep the pins for the life of the deployment.
 
-6. **Wallets and services.** Create and fund the roles above. Set `DEPLOYER` and `FEE_OWNER` (the Safe) in `.env`. Set up the monitor server (see [Monitoring](#monitoring)) and test its webhook.
+6. **Wallets and services.** Create and fund the roles above. Set `DEPLOYER` and `SEED_RECEIVER` in `.env`. Set up the monitor server (see [Monitoring](#monitoring)) and test its webhook.
 
 ## Phase 1: go/no-go after Cobalt (Oct 1)
 
@@ -117,7 +117,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 2. Preflight against live mainnet, with every planned account checked against the stocks' transfer policies:
 
    ```sh
-   python3 scripts/verify_base.py --reads-only --account "$DEPLOYER" --account "$FEE_OWNER" \
+   python3 scripts/verify_base.py --reads-only --account "$DEPLOYER" --account "$SEED_RECEIVER" \
      --account "$VAULT_PREDICTED" --account "$GATEWAY_PREDICTED"
    ```
 
@@ -164,7 +164,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
    "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --sender "$DEPLOYER"
    ```
 
-   Check that the logged `Vault` equals `$VAULT_PREDICTED` and `Gateway fee owner` is the Safe. The run must end `SIMULATION COMPLETE`. A wrong `METHODOLOGY_URI` stops here.
+   Check that the logged `Vault` equals `$VAULT_PREDICTED`. The run must end `SIMULATION COMPLETE`. A wrong `METHODOLOGY_URI` stops here.
 
 3. Broadcast four transactions. Send nothing else from the deployer until all four are mined:
 
@@ -196,7 +196,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 1. Size the seed in the snapshot's exact ratios, so the first execution has nothing to do:
 
    ```sh
-   python3 scripts/seed_basket.py config/snapshot.json --usd 1000 --vault "$VAULT" --receiver "$FEE_OWNER"
+   python3 scripts/seed_basket.py config/snapshot.json --usd 1000 --vault "$VAULT" --receiver "$SEED_RECEIVER"
    ```
 
    Review `config/seed.json` and fund the deployer with the printed `usdc_budget_for_acquire_seed`.
@@ -219,7 +219,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
    python3 scripts/verify_deployment.py --bootstrapped
    ```
 
-   The verifier must report `"ok": true`: 1,000 shares with 10 locked, 990 held by the Safe, backing equal to the seed, and no reserves.
+   The verifier must report `"ok": true`: 1,000 shares with 10 locked, 990 held by the seed receiver, backing equal to the seed, and no reserves.
 
 4. Smoke tests from a small operator wallet (`ME`) holding about 20 USDC, not the deployer:
 
@@ -233,21 +233,21 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
      --ledger --rpc-url "$BASE_RPC_URL"
    cast send "$VAULT" 'redeemBasketWithClaims(uint256,uint256[8],address,uint256)' 1000000000000000000 \
      '[0,0,0,0,0,0,0,0]' "$ME" "$D" --ledger --rpc-url "$BASE_RPC_URL"
-   cast send "$VAULT" 'transfer(address,uint256)' "$FEE_OWNER" 500000000000000000 --ledger --rpc-url "$BASE_RPC_URL"
+   cast send "$VAULT" 'transfer(address,uint256)' "$SEED_RECEIVER" 500000000000000000 --ledger --rpc-url "$BASE_RPC_URL"
    ```
 
-   Here `USDC` is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Expect about $3 spent on the mint (on a $1,000 seed a share is worth about $1), USDC back from the redemption, and every stock leg delivered in kind. `claimOf(ME)` must be all zero, and the gateway's `accruedFees()` greater than zero.
+   Here `USDC` is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Expect about $3 spent on the mint (on a $1,000 seed a share is worth about $1), USDC back from the redemption, and every stock leg delivered in kind. `claimOf(ME)` must be all zero, and the gateway must hold no USDC.
 
 5. Commit `config/snapshot.json`, `config/seed.json` and `deployments/base-mainnet.json`.
 
-**Abort rule:** if a smoke test fails, don't announce. The Safe can take the seed out in kind with `redeemBasketWithClaims`.
+**Abort rule:** if a smoke test fails, don't announce. The seed receiver can take the seed out in kind with `redeemBasketWithClaims`.
 
 ## Announce
 
 Once the smoke tests pass and the monitor is running, publish:
 - the four addresses, with links to their verified source;
 - `METHODOLOGY_URI` and the evidence URI;
-- the fee (1 bp, owner-adjustable up to 10 bp);
+- that there is no fee and no owner;
 - the risks, including that there has been no independent audit.
 
 ## Phase 5: first quarterly cycle (quarter 8107)
@@ -352,4 +352,3 @@ A disputed proposal never blocks a replacement, so propose the correct snapshot 
 
 The contracts fail closed. Holders' in-kind exit through `redeemBasketWithClaims` still delivers every asset that can move, and defers the rest as claims. A replaced stock contract, retired feed or de-listed identifier needs a new deployment and a voluntary migration.
 
-**Fee changes.** Only the Safe can call `setFee(uint16)` (at most 10 bp) or `claimFees(address,uint256)` on the gateway.

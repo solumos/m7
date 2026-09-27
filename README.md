@@ -1,6 +1,6 @@
 # M7CAP — a helper for direct indexing
 
-M7CAP turns a seven-stock Coinbase basket on Base into one transferable ERC-20 receipt. A user supplies USDC; the gateway buys the required constituent quantities, deposits them in the vault, and mints M7CAP. Redemption reverses that process. Each share represents the same proportion of the actual basket. The gateway charges a small USDC trade fee (1 bp by default, at most 0.10%); in-kind entry and exit through the vault are fee-free.
+M7CAP turns a seven-stock Coinbase basket on Base into one transferable ERC-20 receipt. A user supplies USDC; the gateway buys the required constituent quantities, deposits them in the vault, and mints M7CAP. Redemption reverses that process. Each share represents the same proportion of the actual basket. It is free software: there is no fee and no owner, and users pay only the existing pools' prices and gas.
 
 This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. The current code passes native B20 tests against live Base under both Beryl and Cobalt precompile rules, and a full rehearsal of the mainnet runbook on a local fork. No live funds were spent. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the mainnet runbook; independently reviewed company-cap observations and running monitoring are still required before launch.
 
@@ -55,7 +55,7 @@ flowchart LR
 ```
 
 - **M7CapVault:** ERC-20 shares plus asset custody. For backing `B[i]` (balance minus amounts owed to earlier redeemers), supply `S`, and shares `q`, minting collects `ceil(B[i]*q/S)` and redemption returns `floor(B[i]*q/S)`. Actual holdings include incidental USDC, preventing cash from becoming unaccounted backing. Shares mint only after exact transfers succeed. In-kind transactions need no price oracle. `redeemBasket` is all-or-nothing. `redeemBasketWithClaims` delivers every leg that can move and turns a leg that cannot (a frozen or paused asset, a blocked receiver) into a claim the redeemer withdraws later; nothing is forfeited. Receipt transfers, mints and redemptions mirror the seven stocks' B20 transfer policies. Each stock trades only through one pinned USDC pool, checked when the vault is constructed.
-- **USDCGateway:** exact-output purchases for a requested share count and exact-input sales for redemptions, through the vault's pinned pools; callers do not choose routes. The total spending ceiling or minimum proceeds, both including the fee, protect execution. Unspent USDC returns to the caller. Existing gateway donations cannot be spent or claimed by anyone. The fee is charged on USDC spent and on gross proceeds. The owner, transferable in two steps, can only set the fee between 0 and 10 bp and claim fees already charged. It cannot touch vault assets, routes, donations or user funds.
+- **USDCGateway:** exact-output purchases for a requested share count and exact-input sales for redemptions, through the vault's pinned pools; callers do not choose routes. The total spending ceiling or minimum proceeds protect execution. Unspent USDC returns to the caller. The gateway has no owner and charges no fee, and USDC donated to it can never be spent or withdrawn.
 - **IndexController:** accepts current-quarter quantity-ratio assertions through UMA. A disputed proposal, or an undisputed one still unsettled a day after its challenge window, does not block a replacement; the first proposal to settle true is executed. Execution is permissionless, but the executor supplies no trades. The controller plans every leg from the vault's backing, the accepted ratios and one oracle snapshot:
   - each constituent's quantity share moves at most 5% relative, or 0.25% of NAV if larger, per quarter;
   - every stock is only sold or only bought, sales first;
@@ -86,12 +86,11 @@ vault.redeemBasketWithClaims(sharesIn, minAmounts, receiver, deadline); // defer
 vault.claimOf(owner);                     // uint256[8] deferred amounts owed to `owner`
 vault.withdrawClaim(index, amount, to);
 
-gateway.previewFee(usdcAmount);
 gateway.mintWithUSDC(sharesOut, maxUSDCIn, receiver, deadline);
 gateway.redeemToUSDC(sharesIn, minUSDCOut, receiver, deadline);
 ```
 
-The gateway returns the USDC actually spent, including the fee, and received, after it. Obtain executable quotes for the vault's current component quantities; a Chainlink reference price is not an executable quote. A USDC-budget UI chooses a share quantity that fits the budget, sets its spending ceiling, and receives any refund. There is no yield strategy, queue, or dedicated M7CAP liquidity pool. Existing DEX fees, price impact, gas, and issuer economics still apply.
+The gateway returns the USDC actually spent and received. Obtain executable quotes for the vault's current component quantities; a Chainlink reference price is not an executable quote. A USDC-budget UI chooses a share quantity that fits the budget, sets its spending ceiling, and receives any refund. There is no yield strategy, queue, or dedicated M7CAP liquidity pool. Existing DEX fees, price impact, gas, and issuer economics still apply.
 
 M7CAP transfers check the sender, receiver and caller against every stock's B20 transfer policy, so an address an issuer blocks cannot receive, send or redeem M7CAP. Contracts that hold M7CAP, such as pools, must also be authorized. Deferred claims belong to the redeeming address, which may withdraw them to any eligible address once the asset can move.
 
@@ -144,7 +143,7 @@ Each quarter moves the basket at most one bounded step toward the accepted ratio
 
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the step-by-step mainnet runbook: roles and funding, the Cobalt go/no-go, deploy, seed, smoke tests, the first quarterly cycle, monitoring and the incident playbook. The tools it uses:
 
-- `script/Deploy.s.sol` hashes the exact bytes of `docs/METHODOLOGY.md` and refuses a `METHODOLOGY_URI` other than their raw IPFS CID, which `scripts/ipfs_cid.py` prints. The gateway fee owner is `FEE_OWNER`, defaulting to the deployer. The controller is bound to the vault by CREATE address prediction, and the vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
+- `script/Deploy.s.sol` hashes the exact bytes of `docs/METHODOLOGY.md` and refuses a `METHODOLOGY_URI` other than their raw IPFS CID, which `scripts/ipfs_cid.py` prints. The controller is bound to the vault by CREATE address prediction, and the vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
 - `scripts/verify_deployment.py` checks every deployed immutable, binding and runtime bytecode before any funds go in, checks the state after the bootstrap, and writes the deployment record.
 - `scripts/seed_basket.py` sizes the seed in the reviewed snapshot's exact quantity ratios, so the first quarter's execution has nothing to do. Each quarter moves the basket at most one bounded step, so a seed far from the ratios would take several quarters to converge.
 - `script/AcquireSeed.s.sol` buys the seed through the vault's pinned pools at no more than oracle value plus 1%. `script/Bootstrap.s.sol` re-verifies the linkage and deposits the seed atomically.
@@ -157,7 +156,7 @@ The generic contracts cannot eliminate issuer freeze/seizure, custody, oracle, o
 
 Tests cover:
 - **Accounting:** seed, rounding and donation behavior; pro-rata non-dilution; mixed decimals.
-- **Gateway:** refunds and donation isolation; the fee and its owner controls.
+- **Gateway:** refunds, donation isolation, and never retaining user funds.
 - **Transfers and exits:** atomic failed swaps and transfer restrictions; deferred claims; B20 policy mirroring; reentrancy; pinned routes.
 - **Governance:** assertion bonds, disputes and replacement rules; Gregorian quarter boundaries.
 - **Oracles:** stale, quiet and paused feeds; USDC depeg; sequencer recovery.

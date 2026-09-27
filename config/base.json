@@ -467,15 +467,15 @@
   "native_fork_verification": {
     "status": "passed_local_simulation_not_live_broadcast",
     "chain_id": 8453,
-    "date": "2026-09-26",
-    "block": 51837598,
+    "date": "2026-09-27",
+    "block": 51869461,
     "tool": "base/base-anvil nightly-98e7839c65f64aee9627b69a9b98b79afaeb1fae (Foundry 1.6.0-nightly) reproducing base/base 3eb481791135; binaries checked with gh attestation verify",
     "tool_source": "https://github.com/base/base-anvil",
     "precompile_rules_passed": [
       "Beryl",
       "Cobalt"
     ],
-    "figures_from": "Cobalt rules (FOUNDRY_BASE=true) at the block above",
+    "figures_from": "Cobalt rules at the block above; Beryl rules passed at block 51869467",
     "funding": "USDC created with local fork deal; native B20 state was not fabricated",
     "tests": [
       "test/BaseFork.t.sol:testBaseNativeB20BootstrapAndUSDCRoundTrip",
@@ -485,18 +485,18 @@
     ],
     "round_trip": {
       "bootstrap": "100 USDC exact-input purchase from each of the seven real stock pools; equal-dollar fixture, not index weights",
-      "gateway_fee_bps": 1,
+      "gateway": "no owner and no fee",
       "mint_shares_raw": "100000000000000000000",
-      "mint_usdc_raw": "70007031",
-      "redeem_usdc_raw": "69923007"
+      "mint_usdc_raw": "70000037",
+      "redeem_usdc_raw": "69929990"
     },
     "rebalance": {
       "legs": 2,
-      "execute_gas": 562317,
-      "nav_before_usd_1e18": "1050792781328967808800",
-      "nav_after_usd_1e18": "1050809350234957808800",
-      "sold_value_usd_1e18": "4496945450000000000",
-      "bought_value_usd_1e18": "4498069521728000000",
+      "execute_gas": 563256,
+      "nav_before_usd_1e18": "1049525464400801754400",
+      "nav_after_usd_1e18": "1049544483800451754400",
+      "sold_value_usd_1e18": "4494945753500000000",
+      "bought_value_usd_1e18": "4498272078982970000",
       "feeds": "fork-time answers reported fresh with vm.mockCall after time travel; prices unchanged"
     },
     "receipt_transfer_gas": {
@@ -512,10 +512,10 @@
         "Beryl"
       ],
       "fork_source": "https://mainnet.base.org (throttled)",
-      "deployment_checks": 68,
-      "bootstrap_checks": 88,
-      "seed_usdc_spent_raw": "998981522",
-      "seed_oracle_value_usd": "999.999986",
+      "deployment_checks": 65,
+      "bootstrap_checks": 85,
+      "seed_usdc_spent_raw": "999837615",
+      "seed_oracle_value_usd": "999.999984",
       "fixture": "illustrative ratios labelled REHEARSAL FIXTURE, NOT INDEX DATA"
     },
     "not_validated": [

@@ -43,7 +43,7 @@ contract BaseForkTest is VaultHarness {
 
         IPolicyRegistry registry = IPolicyRegistry(vm.parseJsonAddress(manifest, ".policy_registry"));
         (M7CapVault vault,) = _deployVault(assets, routes, router, factory, registry);
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), address(this)); // default 1 bp fee
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
         // Forge mutates only this local fork's standard USDC storage, never native B20 state.
         deal(address(assets[7]), address(this), 2_000e6);
         uint256[8] memory seed;
@@ -89,7 +89,7 @@ contract BaseForkTest is VaultHarness {
         assertEq(assets[7].balanceOf(user), 100e6 - spent + received);
         for (uint256 i; i < 8; ++i) {
             assertGe(assets[i].balanceOf(address(vault)), seed[i]);
-            assertEq(assets[i].balanceOf(address(gateway)), i == 7 ? gateway.accruedFees() : 0);
+            assertEq(assets[i].balanceOf(address(gateway)), 0);
             assertEq(assets[i].allowance(address(gateway), address(router)), 0);
             assertEq(assets[i].allowance(address(gateway), address(vault)), 0);
         }

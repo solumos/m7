@@ -187,7 +187,7 @@ contract VaultPolicyTest is VaultHarness {
     }
 
     function testEligibleUserUsesTheGatewayWithPoliciesActive() public {
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), address(this));
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             _stock(i).mint(address(router), 1e20);
         }

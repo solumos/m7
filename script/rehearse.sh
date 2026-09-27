@@ -38,9 +38,13 @@ forge_script() { # forge_script <script:contract> <sender>
     --gas-estimate-multiplier 200 >"$WORK/logs/$(echo "$1" | tr '/:' '__').log" 2>&1 ||
     { tail -40 "$WORK/logs/$(echo "$1" | tr '/:' '__').log"; fail "$1"; }
 }
-send() {
-  cast send --rpc-url "$LOCAL" --unlocked "$@" >"$WORK/logs/send.log" 2>&1 ||
+send() { # cast send exits 0 even when the transaction reverts, so check the receipt's status
+  cast send --rpc-url "$LOCAL" --unlocked --json "$@" >"$WORK/logs/send.log" 2>&1 ||
     { cat "$WORK/logs/send.log"; fail "cast send $* (a fork source without recent history fails here)"; }
+  if [ "$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "$WORK/logs/send.log")" != 0x1 ]; then
+    cast call --rpc-url "$LOCAL" "$@" 2>&1 | tail -3  # replays the call to show the revert reason
+    fail "transaction reverted: $*"
+  fi
 }
 
 monitor_ok() { # readable, and no critical alert except the quarter deadline (real near a quarter end)
@@ -67,15 +71,15 @@ export BASE_RPC_URL=$LOCAL FOUNDRY_BASE=$UPGRADE FOUNDRY_DISABLE_NIGHTLY_WARNING
 case "$BASE_RPC_URL" in http://127.0.0.1:*) ;; *) fail "refusing a non-local RPC" ;; esac
 
 DEPLOYER=${DEPLOYER:-$(account deployer)}
-SAFE=$(account safe)
+RECEIVER=$(account receiver)
 PROPOSER=$(account proposer)
 USER=$(account user)
-export DEPLOYER FEE_OWNER=$SAFE
+export DEPLOYER
 NONCE=$(cast nonce "$DEPLOYER" --rpc-url "$LOCAL")
-step "Preflight: deployer $DEPLOYER (nonce $NONCE), fee owner and seed receiver $SAFE"
+step "Preflight: deployer $DEPLOYER (nonce $NONCE), seed receiver $RECEIVER"
 PREDICTED_VAULT=$(cast compute-address "$DEPLOYER" --nonce $((NONCE + 2)) | awk '{print $NF}')
 PREDICTED_GATEWAY=$(cast compute-address "$DEPLOYER" --nonce $((NONCE + 3)) | awk '{print $NF}')
-python3 scripts/verify_base.py --rpc "$LOCAL" --reads-only --account "$DEPLOYER" --account "$SAFE" \
+python3 scripts/verify_base.py --rpc "$LOCAL" --reads-only --account "$DEPLOYER" --account "$RECEIVER" \
   --account "$PREDICTED_VAULT" --account "$PREDICTED_GATEWAY" >"$WORK/logs/preflight.json" ||
   fail "verify_base.py (see $WORK/logs/preflight.json)"
 
@@ -94,7 +98,7 @@ EOF
 export VAULT CONTROLLER GATEWAY
 [ "$(cast to-check-sum-address "$VAULT")" = "$(cast to-check-sum-address "$PREDICTED_VAULT")" ] ||
   fail "vault address differs from the prediction"
-python3 scripts/verify_deployment.py --rpc "$LOCAL" --fee-owner "$SAFE" \
+python3 scripts/verify_deployment.py --rpc "$LOCAL" \
   --write-record "$WORK/deployment-record.json" >"$WORK/logs/verify-deployment.json" ||
   fail "verify_deployment.py (see $WORK/logs/verify-deployment.json)"
 
@@ -115,12 +119,12 @@ EOF
 
 step "Size the seed, acquire it from the pinned pools and bootstrap"
 python3 scripts/seed_basket.py config/rehearsal/snapshot.json --usd "$SEED_USD" --vault "$VAULT" \
-  --receiver "$SAFE" --out config/rehearsal/seed.json --rpc "$LOCAL" --max-feed-age 604800 \
+  --receiver "$RECEIVER" --out config/rehearsal/seed.json --rpc "$LOCAL" --max-feed-age 604800 \
   >"$WORK/logs/seed.json" || fail "seed_basket.py (see $WORK/logs/seed.json)"
 export SEED_FILE=config/rehearsal/seed.json MAX_FEED_AGE=604800 GATEWAY
 forge_script script/AcquireSeed.s.sol:AcquireSeed "$DEPLOYER"
 forge_script script/Bootstrap.s.sol:Bootstrap "$DEPLOYER"
-python3 scripts/verify_deployment.py --rpc "$LOCAL" --fee-owner "$SAFE" --bootstrapped \
+python3 scripts/verify_deployment.py --rpc "$LOCAL" --bootstrapped \
   --seed config/rehearsal/seed.json >"$WORK/logs/verify-bootstrap.json" ||
   fail "verify_deployment.py --bootstrapped (see $WORK/logs/verify-bootstrap.json)"
 
@@ -137,13 +141,13 @@ send --from "$USER" "$GATEWAY" 'redeemToUSDC(uint256,uint256,address,uint256)' 1
   "$DEADLINE"
 send --from "$USER" "$VAULT" 'redeemBasketWithClaims(uint256,uint256[8],address,uint256)' 1000000000000000000 \
   '[0,0,0,0,0,0,0,0]' "$USER" "$DEADLINE"
-send --from "$USER" "$VAULT" 'transfer(address,uint256)' "$SAFE" 500000000000000000
+send --from "$USER" "$VAULT" 'transfer(address,uint256)' "$RECEIVER" 500000000000000000
 for i in 0 1 2 3 4 5 6 7; do
   [ "$(cast call "$VAULT" 'reserved(uint256)(uint256)' $i --rpc-url "$LOCAL" | awk '{print $1}')" = 0 ] ||
     fail "a redemption leg was deferred"
 done
-FEES=$(cast call "$GATEWAY" 'accruedFees()(uint256)' --rpc-url "$LOCAL" | awk '{print $1}')
-[ "$FEES" -gt 0 ] || fail "the gateway charged no fee"
+[ "$(cast call "$USDC" 'balanceOf(address)(uint256)' "$GATEWAY" --rpc-url "$LOCAL" | awk '{print $1}')" = 0 ] ||
+  fail "the gateway kept USDC"
 
 step "Propose the fixture, watch, travel 72 hours, settle"
 fund "$PROPOSER" 2000000000
@@ -179,7 +183,6 @@ Valuation:       $VALUATION
 IndexController: $CONTROLLER
 M7CapVault:      $VAULT
 USDCGateway:     $GATEWAY
-Gateway fees:    $FEES (USDC raw)
 Record:          $WORK/deployment-record.json
 Logs:            $WORK/logs
 Execution is not rehearsed here: after 72 hours of time travel the fork's feeds are stale. BaseForkTest

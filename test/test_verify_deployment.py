@@ -15,8 +15,8 @@ ADDRESSES = {'Valuation': '0x' + 'a1' * 20, 'IndexController': '0x' + 'a2' * 20,
              'M7CapVault': '0x' + 'a3' * 20, 'USDCGateway': '0x' + 'a4' * 20}
 DEPLOYER = '0x' + 'de' * 20
 SAFE = '0x' + '5a' * 20
-EXPECTED = {'deployer': DEPLOYER, 'fee_owner': SAFE, 'bond_floor': 1_000 * 10**6, 'fee_bps': 1,
-            'methodology': METHODOLOGY, 'methodology_uri': 'ipfs://' + raw_cid(METHODOLOGY)}
+EXPECTED = {'deployer': DEPLOYER, 'bond_floor': 1_000 * 10**6, 'methodology': METHODOLOGY,
+            'methodology_uri': 'ipfs://' + raw_cid(METHODOLOGY)}
 SEED = {'vault': ADDRESSES['M7CapVault'], 'receiver': SAFE, 'raw_amounts': [10**8 + i for i in range(7)] + [0]}
 
 
@@ -64,8 +64,7 @@ class FakeRPC:
             (valuation, 'registry()', ()): [a(MANIFEST['registry'])],
             (valuation, 'maxAge()', ()): [MANIFEST['risk_checks']['max_stock_feed_age_seconds']],
             (gateway, 'vault()', ()): [a(vault)], (gateway, 'router()', ()): [a(venue['router'])],
-            (gateway, 'usdc()', ()): [a(assets[7])], (gateway, 'owner()', ()): [a(SAFE)],
-            (gateway, 'pendingOwner()', ()): [0], (gateway, 'feeBps()', ()): [1],
+            (gateway, 'usdc()', ()): [a(assets[7])],
         }
         for scope in ('sender', 'receiver', 'executor'):
             self.answers[(vault, scope + 'Scope()', ())] = [keccak_text('TRANSFER_%s_POLICY' % scope.upper())]
@@ -96,14 +95,14 @@ class VerifyDeploymentTest(unittest.TestCase):
         self.assertTrue(report['ok'])
         self.assertFalse(report['metadata_matches']['M7CapVault'])  # only the metadata trailer differs
 
-    def test_detects_wrong_fee_owner_uri_and_binding(self):
+    def test_detects_wrong_gateway_uri_and_binding(self):
         vault, controller = ADDRESSES['M7CapVault'], ADDRESSES['IndexController']
-        rpc = FakeRPC({(ADDRESSES['USDCGateway'], 'owner()', ()): [int(DEPLOYER, 16)],
+        rpc = FakeRPC({(ADDRESSES['USDCGateway'], 'vault()', ()): [1],
                        (controller, 'methodologyURI()', ()): text_words('ipfs://publish-the-reviewed-methodology-here'),
                        (vault, 'controller()', ()): [1]})
         report = verify(rpc, MANIFEST, ADDRESSES, EXPECTED)
         self.assertFalse(report['ok'])
-        self.assertIn('gateway owner', report['failures'])
+        self.assertIn('gateway vault', report['failures'])
         self.assertIn('controller methodology URI is the raw CID of the file', report['failures'])
         self.assertIn('vault controller', report['failures'])
 

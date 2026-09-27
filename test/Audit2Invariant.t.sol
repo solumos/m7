@@ -45,8 +45,7 @@ contract Audit2Handler is Test {
         uint256 supply = vault.totalSupply();
         for (uint256 i; i < 8; ++i) {
             if (vault.backing(i) * lastSupply < lastBacking[i] * supply) backingDecreased = true;
-            uint256 expected = i == 7 ? gateway.accruedFees() : 0;
-            if (tokens[i].balanceOf(address(gateway)) != expected) gatewayRetainedFunds = true;
+            if (tokens[i].balanceOf(address(gateway)) != 0) gatewayRetainedFunds = true;
         }
         _record();
     }
@@ -169,7 +168,7 @@ contract Audit2Handler is Test {
         for (uint256 i; i < 7; ++i) {
             cost += (quote[i] + 99) / 100; // GatewayRouter: $1 stocks, 8 vs 6 decimals, rounded up
         }
-        uint256 maxIn = cost + gateway.previewFee(cost) + bound(slack, 0, 1e9);
+        uint256 maxIn = cost + bound(slack, 0, 1e9);
         tokens[7].mint(a, maxIn);
         uint256 before = tokens[7].balanceOf(a);
         vm.startPrank(a);
@@ -226,7 +225,7 @@ contract Audit2InvariantTest is VaultHarness {
             factory.setPool(address(tokens[i]), address(tokens[7]), 10, address(router));
         }
         (vault,) = _deployVault(assets, _spacings(10), router, factory, new PolicyRegistryMock());
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)), address(this));
+        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             tokens[i].mint(address(this), seed[i]);
             tokens[i].approve(address(vault), seed[i]);
@@ -257,7 +256,7 @@ contract Audit2InvariantTest is VaultHarness {
     }
 
     function invariant_audit2GatewayNeverRetainsOrOverspends() public view {
-        assertFalse(handler.gatewayRetainedFunds(), "gateway kept more than its accrued fees");
+        assertFalse(handler.gatewayRetainedFunds(), "gateway kept user funds");
         assertFalse(handler.gatewayOverspent(), "gateway exceeded maxUSDCIn");
     }
 }

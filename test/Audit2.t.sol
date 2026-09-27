@@ -72,8 +72,7 @@ contract Audit2Test is Test {
         );
         vault = new M7CapVault(assets, spacings, address(controller), router, router, registry, address(this));
         assertEq(address(vault), predictedVault);
-        gateway = new USDCGateway(IM7CapVault(address(vault)), address(this));
-        gateway.setFee(0); // exact reference amounts; the fee has its own suite
+        gateway = new USDCGateway(IM7CapVault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             ControllerToken(addresses[i]).mint(address(this), 1e15);
             ControllerToken(addresses[i]).mint(address(router), 1e15);
