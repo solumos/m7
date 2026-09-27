@@ -128,6 +128,9 @@ python3 scripts/verify_deployment.py --rpc "$LOCAL" --bootstrapped \
   --seed config/rehearsal/seed.json >"$WORK/logs/verify-bootstrap.json" ||
   fail "verify_deployment.py --bootstrapped (see $WORK/logs/verify-bootstrap.json)"
 PRICE=$(cast call "$LENS" 'pricePerShare()(uint256,uint256)' --rpc-url "$LOCAL" | head -1 | awk '{print $1}')
+TOTAL=$(cast call "$LENS" 'totalValue()(uint256,uint256)' --rpc-url "$LOCAL" | head -1 | awk '{print $1}')
+python3 -c 'import sys; p, t = int(sys.argv[1]), int(sys.argv[2]); sys.exit(abs(p * 1000 - t) > 1000)' \
+  "$PRICE" "$TOTAL" || fail "total value $TOTAL is not 1,000 shares at $PRICE"  # the seed's 1,000 shares
 python3 -c 'import sys; p, usd = int(sys.argv[1]), int(sys.argv[2]); sys.exit(abs(p * 1000 / 10**18 - usd) > usd * 0.03)' \
   "$PRICE" "$SEED_USD" || fail "the lens prices a share at $PRICE, not about SEED_USD / 1000"
 
@@ -189,6 +192,7 @@ M7CapVault:      $VAULT
 USDCGateway:     $GATEWAY
 M7CapLens:       $LENS
 Price per share: $(python3 -c "print('%.6f' % ($PRICE / 1e18))") USD
+Total value:     $(python3 -c "print('%.2f' % ($TOTAL / 1e18))") USD
 Record:          $WORK/deployment-record.json
 Logs:            $WORK/logs
 Execution is not rehearsed here: after 72 hours of time travel the fork's feeds are stale. BaseForkTest

@@ -83,6 +83,8 @@ contract M7CapLensTest is Test {
     function testUnseededVaultHasNoPricePerShare() public view {
         (uint256 perShare,) = lens.pricePerShare();
         assertEq(perShare, 0);
+        (uint256 total,) = lens.totalValue();
+        assertEq(total, 0);
     }
 
     function testPricePerShareIsBackingValueOverSupply() public {
@@ -91,6 +93,9 @@ contract M7CapLensTest is Test {
         assertEq(v.supply, 1_000e18);
         assertEq(v.nav, _seedValue());
         assertEq(v.perShare, _seedValue() / 1_000);
+        (uint256 total, uint256 oldest) = lens.totalValue();
+        assertEq(total, _seedValue());
+        assertEq(oldest, block.timestamp);
         for (uint256 i; i < 7; ++i) {
             assertEq(v.components[i], seed[i] * PRICES[i] * 1e10);
         }

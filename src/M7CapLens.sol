@@ -49,6 +49,13 @@ contract M7CapLens {
         return (v.perShare, v.oldestPriceAt);
     }
 
+    /// @notice USD value of everything backing M7CAP (18 decimals) and the update time of the stalest price behind it.
+    /// @dev Excludes assets owed to earlier redeemers as deferred claims, which belong to them, not to holders.
+    function totalValue() external view returns (uint256 nav, uint256 oldestPriceAt) {
+        Value memory v = value();
+        return (v.nav, v.oldestPriceAt);
+    }
+
     function value() public view returns (Value memory v) {
         uint256[8] memory held;
         uint256[8] memory prices;

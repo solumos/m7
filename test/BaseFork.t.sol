@@ -239,6 +239,9 @@ contract BaseForkTest is VaultHarness {
         assertLe(v.oldestPriceAt, block.timestamp);
         assertFalse(v.issuerPaused);
         assertFalse(v.sequencerDown);
+        (uint256 vaultValue,) = lens.totalValue();
+        assertEq(vaultValue, v.nav);
+        emit log_named_decimal_uint("Total value (USD)", vaultValue, 18);
         emit log_named_decimal_uint("Price per share (USD)", v.perShare, 18);
         emit log_named_uint("Stalest price age (seconds)", block.timestamp - v.oldestPriceAt);
     }

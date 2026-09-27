@@ -92,10 +92,11 @@ gateway.mintWithUSDC(sharesOut, maxUSDCIn, receiver, deadline);
 gateway.redeemToUSDC(sharesIn, minUSDCOut, receiver, deadline);
 
 lens.pricePerShare();                     // USD per whole M7CAP (18 decimals), stalest price time
+lens.totalValue();                        // USD value of all backing (18 decimals), stalest price time
 lens.value();                             // plus NAV, supply, per-asset values, pause and sequencer flags
 ```
 
-The gateway returns the USDC actually spent and received. `M7CapLens` reports the value of a share from the latest oracle prices at any time; unlike the rebalance valuation it applies no trading window or staleness rule, and it returns the time of its stalest price instead. Stock feeds stand still outside market hours, so treat it as a display price, not a lending or liquidation price. The lens has no owner and changes nothing, so it can be redeployed at any time. Obtain executable quotes for the vault's current component quantities; a Chainlink reference price is not an executable quote. A USDC-budget UI chooses a share quantity that fits the budget, sets its spending ceiling, and receives any refund. There is no yield strategy, queue, or dedicated M7CAP liquidity pool. Existing DEX fees, price impact, gas, and issuer economics still apply.
+The gateway returns the USDC actually spent and received. `M7CapLens` reports the value of a share, and of the whole vault, from the latest oracle prices at any time; unlike the rebalance valuation it applies no trading window or staleness rule, and it returns the time of its stalest price instead. Stock feeds stand still outside market hours, so treat it as a display price, not a lending or liquidation price. The lens has no owner and changes nothing, so it can be redeployed at any time. Obtain executable quotes for the vault's current component quantities; a Chainlink reference price is not an executable quote. A USDC-budget UI chooses a share quantity that fits the budget, sets its spending ceiling, and receives any refund. There is no yield strategy, queue, or dedicated M7CAP liquidity pool. Existing DEX fees, price impact, gas, and issuer economics still apply.
 
 M7CAP transfers check the sender, receiver and caller against every stock's B20 transfer policy, so an address an issuer blocks cannot receive, send or redeem M7CAP. Contracts that hold M7CAP, such as pools, must also be authorized. Deferred claims belong to the redeeming address, which may withdraw them to any eligible address once the asset can move.
 
