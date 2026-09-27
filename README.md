@@ -2,7 +2,7 @@
 
 M7CAP turns a seven-stock Coinbase basket on Base into one transferable ERC-20 receipt. A user supplies USDC; the gateway buys the required constituent quantities, deposits them in the vault, and mints M7CAP. Redemption reverses that process. Each share represents the same proportion of the actual basket. The gateway charges a small USDC trade fee (1 bp by default, at most 0.10%); in-kind entry and exit through the vault are fee-free.
 
-This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. Live Base integration was tested on a local fork with native B20 execution before the remediation below; that native test has not been re-run against the current code. No live funds were spent. Initial, independently reviewed company-cap observations and operational oracle monitoring are still required before launch.
+This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. The current code passes native B20 tests against live Base under both Beryl and Cobalt precompile rules, and a full rehearsal of the mainnet runbook on a local fork. No live funds were spent. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the mainnet runbook; independently reviewed company-cap observations and running monitoring are still required before launch.
 
 Two internal reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), record findings and reproductions. The current code addresses every open finding from both; each document's status section links the fixes to regression tests and lists the residual risks.
 
@@ -17,14 +17,15 @@ make check
 
 `make check` builds the contracts, checks formatting, and runs Solidity and Python tests. The live-state fork test explicitly skips unless opted in. Solidity is pinned to 0.8.30; dependencies are OpenZeppelin 5.4.0 and forge-std 1.9.7.
 
-For native B20 integration, use [Base's Foundry build](https://github.com/base/base-anvil/releases/tag/v1.1.0), which contains the Base precompiles. Its executable is named `forge`; keep it separate from ordinary Foundry:
+For native B20 integration, use Base's Foundry build, [base-anvil](https://github.com/base/base-anvil), which contains the Base precompiles. Install it beside ordinary Foundry, verified against its build attestation, as [the runbook](docs/DEPLOYMENT.md#toolchain) describes. Then:
 
 ```sh
-BASE_FORK_TEST=true BASE_FORK_BLOCK=51830602 FOUNDRY_BASE=true \
-  "$BASE_FORGE" test --match-contract BaseForkTest -vv
+BASE_FORK_TEST=true FOUNDRY_BASE=cobalt "$BASE_FORGE" test --match-contract BaseForkTest -vv
 ```
 
-`BASE_FORGE` is the path to the Base-aware binary. `BASE_RPC_URL` optionally selects an archive-capable Base endpoint. This command mutates only a local fork, buys the seven B20s from their actual pools, and exercises the real vault and gateway. It neither fabricates B20 balances nor broadcasts transactions. The equal-dollar test seed exercises routing; it is not the proposed market-cap allocation.
+`BASE_FORGE` is the path to the Base-aware `forge`. `FOUNDRY_BASE` selects the precompile rules: `beryl`, which mainnet runs until 2026-09-30 18:00 UTC, or `cobalt` after that. `BASE_RPC_URL` optionally selects a Base endpoint. The tests mutate only a local fork: they buy the seven B20s from their actual pools, run the real vault, gateway and controller, settle a real UMA assertion and rebalance through the live pools. They neither fabricate B20 balances nor broadcast transactions. Their seeds exercise routing; they are not the market-cap allocation.
+
+`script/rehearse.sh` runs the whole mainnet runbook against a local base-anvil fork: deploy, verification, seed purchase, bootstrap, smoke tests, a proposal, settlement and the monitor.
 
 Run current read-only integration checks separately:
 
@@ -32,7 +33,7 @@ Run current read-only integration checks separately:
 python3 scripts/verify_base.py
 ```
 
-An exit status of 1 outside the execution window, or when no stock feed has updated within the last hour, is expected. The JSON distinguishes integration reads from rebalance eligibility. Historical addresses, source provenance, pool identities, and quotes are in [config/base.json](config/base.json) and [docs/INTEGRATION.md](docs/INTEGRATION.md).
+An exit status of 1 outside the execution window, or when no stock feed has updated within the last hour, is expected; `--reads-only` exits 0 whenever the read checks pass. `--account` also checks planned addresses, such as the vault and gateway, against every stock's transfer policies. The JSON distinguishes integration reads from rebalance eligibility. Historical addresses, source provenance, pool identities, and quotes are in [config/base.json](config/base.json) and [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 Replay recent execution windows under the controller's oracle rule, as evidence that quarterly rebalancing stays available:
 
@@ -127,7 +128,7 @@ This one-shot monitor reports:
 - assertions that can never settle because USDC refuses the payee;
 - whether a replacement proposal is allowed.
 
- Exit codes are 0 for a matched/executed state, 1 for operational alerts, and 2 for failed reads. It never fetches evidence URLs or submits disputes. Run it under an external scheduler with alert delivery and independent source review; a successful comparison does not establish that either snapshot is truthful.
+ Each alert is tagged `critical`, `action` or `info`; a quarter with 21 days or fewer left and no execution is critical. Exit codes are 0 for a matched/executed state, 1 for alerts at or above `--fail-on` (default: any), and 2 for failed reads. It never fetches evidence URLs or submits disputes. `scripts/monitor.py` runs it on a schedule with webhook alerts and a heartbeat; see [Monitoring](docs/DEPLOYMENT.md#monitoring). A successful comparison does not establish that either snapshot is truthful; independent source review is still required.
 
 The proposal script reads `config/snapshot.json` (including `observation_sha256`), `CONTROLLER`, `PROPOSER`, and a content-addressed `EVIDENCE_URI`. The settle script uses `EXECUTOR` and `ASSERTION_ID`. The execute script takes only `EXECUTOR` and an optional `DEADLINE`: the controller plans every leg on chain, so there is no plan file to go stale. Simulate before broadcasting.
 
@@ -141,17 +142,16 @@ Each quarter moves the basket at most one bounded step toward the accepted ratio
 
 ## Deployment workflow
 
-`script/Deploy.s.sol` reads the canonical Base manifest and hashes the exact bytes of `docs/METHODOLOGY.md`. It needs `METHODOLOGY_URI`, a content-addressed copy of those exact bytes, and optionally `FEE_OWNER`, the gateway fee owner, which defaults to the deployer. It predicts the vault's CREATE address to bind the controller immutably without an admin setter. The vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the step-by-step mainnet runbook: roles and funding, the Cobalt go/no-go, deploy, seed, smoke tests, the first quarterly cycle, monitoring and the incident playbook. The tools it uses:
 
-```sh
-FOUNDRY_BASE=true "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL"
-```
+- `script/Deploy.s.sol` hashes the exact bytes of `docs/METHODOLOGY.md` and refuses a `METHODOLOGY_URI` other than their raw IPFS CID, which `scripts/ipfs_cid.py` prints. The gateway fee owner is `FEE_OWNER`, defaulting to the deployer. The controller is bound to the vault by CREATE address prediction, and the vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
+- `scripts/verify_deployment.py` checks every deployed immutable, binding and runtime bytecode before any funds go in, checks the state after the bootstrap, and writes the deployment record.
+- `scripts/seed_basket.py` sizes the seed in the reviewed snapshot's exact quantity ratios, so the first quarter's execution has nothing to do. Each quarter moves the basket at most one bounded step, so a seed far from the ratios would take several quarters to converge.
+- `script/AcquireSeed.s.sol` buys the seed through the vault's pinned pools at no more than oracle value plus 1%. `script/Bootstrap.s.sol` re-verifies the linkage and deposits the seed atomically.
 
-This is a simulation unless `--broadcast` is explicitly added. No production deployment was performed during implementation. Use a Foundry keystore or hardware wallet for an independently reviewed deployment; no private key is required by the repository's test or read tools.
+Scripts that touch B20 tokens need Base's Foundry build. Without `--broadcast` they only simulate. Use a hardware wallet or an encrypted Foundry keystore; no private key is required by the repository's tests or read tools.
 
-After acquiring the reviewed seven-stock seed basket, copy `config/seed.example.json` to `config/seed.json`, fill the actual vault, receiver, and raw amounts, and simulate `script/Bootstrap.s.sol:Bootstrap`. Before funding, it verifies on chain that the controller is bound to the vault, the valuation exists and matches the vault's assets, every pinned pool exists, and, when `GATEWAY` is set, the gateway is bound to the vault. The seed basket should come from the reviewed cap-weight observations: the first quarter moves each stock at most one bounded step from the seed. Bootstrap transfers all seven assets and issues the initial shares atomically. The approvals may occur in preceding transactions. Public minting remains unavailable until bootstrap succeeds.
-
-Before launch, complete sourced cap-weight observations, independent security review, issuer/wrapper distribution review, actual-address policy checks, current liquidity and feed validation, and independent UMA monitoring. The generic contracts cannot eliminate issuer freeze/seizure, custody, oracle, or Base dependencies. A replaced stock token, retired feed, or unsupported corporate event may require a new deployment and voluntary migration.
+The generic contracts cannot eliminate issuer freeze/seizure, custody, oracle, or Base dependencies. A replaced stock token, retired feed, or unsupported corporate event may require a new deployment and voluntary migration.
 
 ## Validation coverage
 
@@ -163,6 +163,6 @@ Tests cover:
 - **Oracles:** stale, quiet and paused feeds; USDC depeg; sequencer recovery.
 - **Planner:** bounded steps, loss and cash bounds, fuzzed against pool deviation and haircuts.
 
-Stateful invariant campaigns check per-share backing, reserves, claims and gateway balances. Opt-in fork tests replay the router-dust and unpayable-dispute scenarios against live Base contracts. The native Base fork additionally tests real B20 transfers, approvals, actual pool routing, and complete USDC entry/exit; it needs Base's patched Forge and has not been re-run since the remediation.
+Stateful invariant campaigns check per-share backing, reserves, claims and gateway balances. Opt-in fork tests replay the router-dust and unpayable-dispute scenarios against live Base contracts. The native Base fork additionally tests real B20 transfers and policies, actual pool routing, complete USDC entry and exit, the UMA bond lifecycle and a rebalance through the live pools; it needs Base's Foundry build and passes under both Beryl and Cobalt rules. `script/rehearse.sh` rehearses the deployment end to end.
 
 The helper pools assets into one receipt; it does not provide separately registered brokerage positions or per-stock tax-lot control to each holder. Its legal status and distribution depend on the final product structure and applicable issuer terms.

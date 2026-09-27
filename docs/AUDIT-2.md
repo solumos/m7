@@ -47,7 +47,7 @@ Residual risks after remediation:
 - **Eligibility:** policy mirroring means a stock-wide freeze or an allowlist switch also freezes M7CAP transfers, including M7CAP held in DeFi.
 - **Fee owner:** the gateway now has an owner who can set a fee of at most 10 bp and claim fees charged.
 
-Native B20 behavior of the new code, including registry lookups and their gas, still needs a run with Base's patched Forge.
+Native B20 behavior of the new code has since been tested against live Base under both Beryl and Cobalt rules, including registry lookups and their gas and a rebalance through the live pools (see [INTEGRATION.md](INTEGRATION.md)).
 
 ## Method
 
@@ -198,7 +198,7 @@ Checked and dismissed: first-depositor inflation, gateway donation theft, read-o
 
 ## Limits
 
-- Base's patched Foundry build was not available, so no new test executed native B20 code. The fork tests use USDC/WETH pools and synthetic stock tokens.
+- Base's Foundry build was not available during the review, so no new test executed native B20 code; the review's fork tests use USDC/WETH pools and synthetic stock tokens. The native tests have run since and pass.
 - N-02's fork tests mock the DVM vote.
 - Extraction amounts use modeled venues, not live pool depth.
 - The Python tools were reviewed only for consistency with on-chain rules.

@@ -1,4 +1,4 @@
-.PHONY: deps test check integration
+.PHONY: deps test check integration native rehearse
 
 deps:
 	forge install --no-git --shallow OpenZeppelin/openzeppelin-contracts@v5.4.0 foundry-rs/forge-std@v1.9.7
@@ -14,3 +14,11 @@ check:
 
 integration:
 	python3 scripts/verify_base.py
+
+# Native B20 fork tests; needs Base's Foundry build (docs/DEPLOYMENT.md). FOUNDRY_BASE=beryl before Cobalt.
+native:
+	BASE_FORK_TEST=true FOUNDRY_BASE=$${FOUNDRY_BASE:-cobalt} "$${BASE_FORGE:?set BASE_FORGE}" test --match-contract BaseForkTest -vv
+
+# Rehearse the mainnet runbook on a local base-anvil fork.
+rehearse:
+	script/rehearse.sh

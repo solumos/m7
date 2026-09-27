@@ -113,8 +113,8 @@
   ],
   "launch_blockers": [
     "Reviewed quarter-end company share observations and initial weights are not supplied.",
-    "Native Base local-fork gateway round-trip passed; repeat against final production deployment addresses and reviewed cap-weighted bootstrap quantities before seeding.",
-    "Independent smart-contract review and issuer eligibility/legal review remain required.",
+    "Re-run the native tests and script/rehearse.sh on a post-Cobalt block (after 2026-09-30 18:00 UTC), and verify the deployment with scripts/verify_deployment.py before seeding.",
+    "Issuer eligibility and legal review remain the owner's responsibility. The owner decided on 2026-09-26 to launch without an independent smart-contract review.",
     "Independent UMA monitoring and dispute capital must be funded separately from seed backing."
   ],
   "policy_registry": "0x8453000000000000000000000000000000000002",
@@ -467,29 +467,62 @@
   "native_fork_verification": {
     "status": "passed_local_simulation_not_live_broadcast",
     "chain_id": 8453,
-    "block": 51830602,
-    "tool": "official base/base-anvil Base Foundry v1.1.0",
+    "date": "2026-09-26",
+    "block": 51837598,
+    "tool": "base/base-anvil nightly-98e7839c65f64aee9627b69a9b98b79afaeb1fae (Foundry 1.6.0-nightly) reproducing base/base 3eb481791135; binaries checked with gh attestation verify",
     "tool_source": "https://github.com/base/base-anvil",
-    "funding": "2,000 USDC created with local fork deal; native B20 state was not fabricated",
-    "bootstrap": "100 USDC exact-input purchase per each of seven real stock pools; equal-dollar test fixture, not index target weights",
-    "mint_shares_raw": "100000000000000000000",
-    "mint_usdc_raw": "70000034",
-    "redeem_usdc_raw": "69929989",
-    "asserted": [
-      "All seven stocks acquired from actual live-state pools using native B20 execution.",
-      "Bootstrap transferred exact acquired B20 quantities into deployed vault code.",
-      "USDC gateway minted then redeemed all user shares and refunded unused USDC.",
-      "Final user USDC balance reconciled; vault retained at least each starting asset balance.",
-      "Gateway asset balances and router/vault allowances returned to zero."
+    "precompile_rules_passed": [
+      "Beryl",
+      "Cobalt"
     ],
+    "figures_from": "Cobalt rules (FOUNDRY_BASE=true) at the block above",
+    "funding": "USDC created with local fork deal; native B20 state was not fabricated",
+    "tests": [
+      "test/BaseFork.t.sol:testBaseNativeB20BootstrapAndUSDCRoundTrip",
+      "test/BaseFork.t.sol:testBaseLiveUMAAssertionAndBondRefund",
+      "test/BaseFork.t.sol:testBaseNativeRebalanceAgainstLivePools",
+      "test/BaseFork.t.sol:testBaseNativeTransferGasAndResilientRedemption"
+    ],
+    "round_trip": {
+      "bootstrap": "100 USDC exact-input purchase from each of the seven real stock pools; equal-dollar fixture, not index weights",
+      "gateway_fee_bps": 1,
+      "mint_shares_raw": "100000000000000000000",
+      "mint_usdc_raw": "70007031",
+      "redeem_usdc_raw": "69923007"
+    },
+    "rebalance": {
+      "legs": 2,
+      "execute_gas": 562317,
+      "nav_before_usd_1e18": "1050792781328967808800",
+      "nav_after_usd_1e18": "1050809350234957808800",
+      "sold_value_usd_1e18": "4496945450000000000",
+      "bought_value_usd_1e18": "4498069521728000000",
+      "feeds": "fork-time answers reported fresh with vm.mockCall after time travel; prices unchanged"
+    },
+    "receipt_transfer_gas": {
+      "new_recipient": 51549,
+      "existing_recipient": 27649,
+      "note": "measured inside one test transaction; a standalone transfer also pays cold account access"
+    },
+    "rehearsal": {
+      "script": "script/rehearse.sh",
+      "status": "passed",
+      "precompile_rules": [
+        "Cobalt",
+        "Beryl"
+      ],
+      "fork_source": "https://mainnet.base.org (throttled)",
+      "deployment_checks": 68,
+      "bootstrap_checks": 88,
+      "seed_usdc_spent_raw": "998981522",
+      "seed_oracle_value_usd": "999.999986",
+      "fixture": "illustrative ratios labelled REHEARSAL FIXTURE, NOT INDEX DATA"
+    },
     "not_validated": [
       "Reviewed production market-cap weights and production deployment addresses.",
       "Live broadcast, real funds, or issuer redemption.",
-      "Disputed cross-chain UMA resolution and native stock rebalance execution."
-    ],
-    "tests": [
-      "test/BaseFork.t.sol:testBaseNativeB20BootstrapAndUSDCRoundTrip",
-      "test/BaseFork.t.sol:testBaseLiveUMAAssertionAndBondRefund"
+      "Disputed cross-chain UMA resolution.",
+      "Precompile behavior on a post-Cobalt mainnet block (re-run after 2026-09-30 18:00 UTC)."
     ],
     "uma_lifecycle": {
       "status": "passed_real_OOv3_on_local_fork",
@@ -504,6 +537,12 @@
       "oracle_mocked": false,
       "whitelist_modified": false,
       "live_transaction_broadcast": false
+    },
+    "pre_remediation_run": {
+      "block": 51830602,
+      "tool": "official base/base-anvil Base Foundry v1.1.0",
+      "mint_usdc_raw": "70000034",
+      "redeem_usdc_raw": "69929989"
     }
   },
   "uma_assertion_identifier": "ASSERT_TRUTH2",

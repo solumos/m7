@@ -23,7 +23,7 @@ Reviewed commit [`ac11b0930af0a778a0d37a90b49ede5add359df4`](https://github.com/
 - **D-01.** `redeemBasketWithClaims` delivers every movable leg and turns the rest into claims withdrawable later; the gateway path stays atomic. Tests: `test/VaultClaims.t.sol`.
 - **D-02.** M7CAP transfers, mints, redemptions and claim withdrawals check the stocks' B20 transfer policies. Regression: `testStockAddressExclusionPropagatesToReceiptHolders`; matrix in `test/VaultPolicy.t.sol`.
 
-The stack is still not ready for public deposits. It has had no external audit, and the native Base fork tests have not been re-run against the current code. Residual risks are listed in the second review.
+The native Base fork tests have since been re-run against the current code and pass (see [INTEGRATION.md](INTEGRATION.md)). The stack has had no external audit, and the owner has decided to launch without one; public deposits carry that risk. Residual risks are listed in the second review.
 
 Severity considers impact and prerequisites. Medium covers bounded value loss, material index-tracking failure, or maintenance unavailability. Low covers a costly, limited disruption. D-01's high impact requires an issuer transfer pause or policy rejection; it is not evidence that an arbitrary user can freeze the vault. D-02 is a defect only if receipt-level eligibility enforcement is a product requirement. No critical issue was confirmed within this scope.
 
