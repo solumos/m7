@@ -201,6 +201,8 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 
    Review `config/seed.json` and fund the deployer with the printed `usdc_budget_for_acquire_seed`.
 
+   **Seed size.** Every stock needs at least 0.01 tokens, so the seed must be worth at least about $100. META, with a high price and a small quantity weight, sets the limit, and the script refuses a smaller seed and prints the minimum. Only 1% of the seed stays locked for good. Rebalances need more: the planner skips trades under $0.10, so below about $500 of total value a typical quarter's buyback-sized changes cannot be carried out and `execute` reverts `NotCompliant`. Nothing is lost when that happens; the basket keeps its quantities. The seed's own quarter needs no trades. If outside minting has not brought the vault past about $500 before the first real rebalance in January, mint the difference yourself through the gateway. It charges no fee, and those shares stay redeemable at any time.
+
 2. Buy the seed through the vault's pinned pools. Simulate first, then broadcast. Each of the seven purchases is an approval, a swap and an approval reset:
 
    ```sh
