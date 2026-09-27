@@ -88,11 +88,11 @@ fund "$DEPLOYER" $((SEED_USD * 2 * 1000000))
 METHODOLOGY_URI=$(python3 scripts/ipfs_cid.py docs/METHODOLOGY.md)
 export METHODOLOGY_URI
 forge_script script/Deploy.s.sol:Deploy "$DEPLOYER"
-read -r VALUATION CONTROLLER VAULT GATEWAY < <(python3 - <<'EOF'
+read -r VALUATION CONTROLLER VAULT GATEWAY LENS < <(python3 - <<'EOF'
 import json
 d = json.load(open('broadcast/Deploy.s.sol/8453/run-latest.json'))
 a = {t['contractName']: t['contractAddress'] for t in d['transactions'] if t.get('transactionType') == 'CREATE'}
-print(a['Valuation'], a['IndexController'], a['M7CapVault'], a['USDCGateway'])
+print(a['Valuation'], a['IndexController'], a['M7CapVault'], a['USDCGateway'], a['M7CapLens'])
 EOF
 )
 export VAULT CONTROLLER GATEWAY
@@ -127,6 +127,9 @@ forge_script script/Bootstrap.s.sol:Bootstrap "$DEPLOYER"
 python3 scripts/verify_deployment.py --rpc "$LOCAL" --bootstrapped \
   --seed config/rehearsal/seed.json >"$WORK/logs/verify-bootstrap.json" ||
   fail "verify_deployment.py --bootstrapped (see $WORK/logs/verify-bootstrap.json)"
+PRICE=$(cast call "$LENS" 'pricePerShare()(uint256,uint256)' --rpc-url "$LOCAL" | head -1 | awk '{print $1}')
+python3 -c 'import sys; p, usd = int(sys.argv[1]), int(sys.argv[2]); sys.exit(abs(p * 1000 / 10**18 - usd) > usd * 0.03)' \
+  "$PRICE" "$SEED_USD" || fail "the lens prices a share at $PRICE, not about SEED_USD / 1000"
 
 step "Smoke tests: gateway mint and redeem, in-kind resilient redemption, receipt transfer"
 fund "$USER" 20000000
@@ -158,7 +161,7 @@ export ASSERTION_ID EXECUTOR=$USER
 python3 scripts/watch_index.py --controller "$CONTROLLER" --rpc "$LOCAL" \
   --expected-snapshot config/rehearsal/snapshot.json >"$WORK/logs/watch-pending.json" || true
 grep -q 'Challenge window is open' "$WORK/logs/watch-pending.json" || fail "watcher did not see the open challenge"
-python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --rpc "$LOCAL" \
+python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
   --expected-snapshot config/rehearsal/snapshot.json --state-file "$WORK/monitor-state.json" \
   >"$WORK/logs/monitor-pending.json" || true
 monitor_ok "$WORK/logs/monitor-pending.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor-pending.json)"
@@ -170,11 +173,12 @@ forge_script script/Maintain.s.sol:Settle "$USER"
 python3 scripts/watch_index.py --controller "$CONTROLLER" --rpc "$LOCAL" \
   --expected-snapshot config/rehearsal/snapshot.json >"$WORK/logs/watch-accepted.json" || true
 grep -q 'awaits permissionless execution' "$WORK/logs/watch-accepted.json" || fail "watcher missed the acceptance"
-python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --rpc "$LOCAL" \
+python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
   --expected-snapshot config/rehearsal/snapshot.json --state-file "$WORK/monitor-state.json" \
   >"$WORK/logs/monitor-accepted.json" || true
 monitor_ok "$WORK/logs/monitor-accepted.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor-accepted.json)"
 grep -q 'awaits permissionless execution' "$WORK/logs/monitor-accepted.json" || fail "monitor did not report the due execution"
+grep -q '"price_per_share_usd"' "$WORK/logs/monitor-accepted.json" || fail "monitor did not report the price per share"
 
 step "Rehearsal passed"
 cat <<EOF
@@ -183,6 +187,8 @@ Valuation:       $VALUATION
 IndexController: $CONTROLLER
 M7CapVault:      $VAULT
 USDCGateway:     $GATEWAY
+M7CapLens:       $LENS
+Price per share: $(python3 -c "print('%.6f' % ($PRICE / 1e18))") USD
 Record:          $WORK/deployment-record.json
 Logs:            $WORK/logs
 Execution is not rehearsed here: after 72 hours of time travel the fork's feeds are stale. BaseForkTest

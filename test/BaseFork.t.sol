@@ -7,6 +7,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {M7CapVault} from "../src/M7CapVault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
+import {M7CapLens} from "../src/M7CapLens.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3, ICoinbaseOracleRegistry} from "../src/Valuation.sol";
 import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
@@ -217,6 +218,29 @@ contract BaseForkTest is VaultHarness {
             assertEq(vault.reserved(i), 0);
         }
         assertEq(vault.balanceOf(holder), 51e18);
+    }
+
+    /// @dev Price per share from the live feeds: a seed bought for 700 USDC backs 1,000 shares worth about $0.70 each.
+    function testBaseNativeLensPricesShares() public {
+        _startFork();
+        IndexController controller = _deployFixtureController();
+        M7CapVault vault = M7CapVault(payable(address(controller.vault())));
+        M7CapLens lens = new M7CapLens(controller);
+        vault.bootstrap(_buySeed(vault, 100e6), address(this));
+        M7CapLens.Value memory v = lens.value();
+        uint256 total;
+        for (uint256 i; i < 8; ++i) {
+            total += v.components[i];
+        }
+        assertEq(v.nav, total);
+        assertEq(v.supply, 1_000e18);
+        // Pool prices sit within a fraction of a percent of the feeds, so the seed is worth about what it cost.
+        assertApproxEqRel(v.perShare, 0.7e18, 0.01e18);
+        assertLe(v.oldestPriceAt, block.timestamp);
+        assertFalse(v.issuerPaused);
+        assertFalse(v.sequencerDown);
+        emit log_named_decimal_uint("Price per share (USD)", v.perShare, 18);
+        emit log_named_uint("Stalest price age (seconds)", block.timestamp - v.oldestPriceAt);
     }
 
     function _deployFixtureController() private returns (IndexController controller) {

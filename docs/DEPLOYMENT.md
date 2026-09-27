@@ -166,7 +166,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    Check that the logged `Vault` equals `$VAULT_PREDICTED`. The run must end `SIMULATION COMPLETE`. A wrong `METHODOLOGY_URI` stops here.
 
-3. Broadcast four transactions. Send nothing else from the deployer until all four are mined:
+3. Broadcast five transactions: the Valuation, controller, vault and gateway, then the read-only price lens. Send nothing else from the deployer until all five are mined:
 
    ```sh
    "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
@@ -183,7 +183,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    Expect `"ok": true`, with every contract's `runtime code matches the local build`.
 
-5. Put `VAULT`, `CONTROLLER` and `GATEWAY` in `.env`. Point the monitor at `CONTROLLER` and `GATEWAY`, and confirm one heartbeat.
+5. Put `VAULT`, `CONTROLLER`, `GATEWAY` and `LENS` in `.env`. Point the monitor at `CONTROLLER`, `GATEWAY` and `LENS`, and confirm one heartbeat.
 
 **Abort rules:**
 - **A deploy transaction fails.** Stop. The contracts already created are inert: the controller is bound to a vault address nobody can deploy any more. After diagnosing, redeploy from the next nonce and redo Phase 1 for the new predicted addresses.
@@ -219,7 +219,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
    python3 scripts/verify_deployment.py --bootstrapped
    ```
 
-   The verifier must report `"ok": true`: 1,000 shares with 10 locked, 990 held by the seed receiver, backing equal to the seed, and no reserves.
+   The verifier must report `"ok": true`: 1,000 shares with 10 locked, 990 held by the seed receiver, backing equal to the seed, and no reserves. Its `price_per_share_usd` should be about the seed's value divided by 1,000.
 
 4. Smoke tests from a small operator wallet (`ME`) holding about 20 USDC, not the deployer:
 
@@ -245,7 +245,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 ## Announce
 
 Once the smoke tests pass and the monitor is running, publish:
-- the four addresses, with links to their verified source;
+- the five addresses, with links to their verified source;
 - `METHODOLOGY_URI` and the evidence URI;
 - that there is no fee and no owner;
 - the risks, including that there has been no independent audit.
@@ -289,6 +289,8 @@ Once the smoke tests pass and the monitor is running, publish:
 
 `scripts/monitor.py` runs every 15 minutes from a systemd timer on an always-on Linux server. It:
 - reads the controller with `watch_index.py`;
+- records the price per share from the lens in `price-history.jsonl` beside its state file;
+- alerts if backing per share falls outside a rebalance (an issuer seizure or burn), if new minting is blocked, or if deferred claims are outstanding;
 - runs the `verify_base.py` read checks hourly, with the vault and gateway as policy accounts;
 - posts new alerts to a Slack or Discord webhook;
 - repeats open critical alerts every six hours and announces cleared ones;
@@ -324,8 +326,8 @@ For the heartbeat, create a check (for example on healthchecks.io) that expects 
 
 | Level | Examples | Response |
 |---|---|---|
-| critical | ratios or digest differ from the reviewed snapshot; a proposal while no reviewed snapshot is loaded; unexpected UMA parameters; a disputed or unsettleable assertion; 21 days or fewer left without an execution; failed preflight reads | Act now: see the playbook |
-| action | no proposal yet; settlement available; an accepted proposal awaiting execution; a rejected proposal | Run the next maintenance step |
+| critical | ratios or digest differ from the reviewed snapshot; a proposal while no reviewed snapshot is loaded; unexpected UMA parameters; a disputed or unsettleable assertion; 21 days or fewer left without an execution; failed preflight reads; backing per share fell; minting blocked | Act now: see the playbook |
+| action | no proposal yet; settlement available; an accepted proposal awaiting execution; a rejected proposal; deferred claims outstanding | Run the next maintenance step |
 | info | challenge window open on a matching proposal; replacement allowed | None |
 
 ## Incident playbook
@@ -343,6 +345,10 @@ A disputed proposal never blocks a replacement, so propose the correct snapshot 
 **Our proposal disputed or unsettleable.** Propose again at once; the replacement is allowed. Settle whichever resolves true first.
 
 **Quarter deadline.** Leave at least four days: 72 hours of challenge and a weekday window. An accepted but unexecuted proposal expires at the quarter boundary, and the basket is simply kept.
+
+**Backing per share fell.** Minting, redeeming and claims never lower it, so a fall outside a rebalance means an issuer seized or burned vault holdings. Check the stock's `Transfer` events from the vault and the issuer's announcements. Claims are paid before holders, so holders absorb the loss.
+
+**Minting blocked.** An issuer seizure pushed a stock below the vault's precision floor. Redemptions still work, and the next quarterly rebalance rebuilds the stock by one step.
 
 **Preflight failure.** The message names the check:
 - a paused stock or issuer feed;

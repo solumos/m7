@@ -481,7 +481,8 @@
       "test/BaseFork.t.sol:testBaseNativeB20BootstrapAndUSDCRoundTrip",
       "test/BaseFork.t.sol:testBaseLiveUMAAssertionAndBondRefund",
       "test/BaseFork.t.sol:testBaseNativeRebalanceAgainstLivePools",
-      "test/BaseFork.t.sol:testBaseNativeTransferGasAndResilientRedemption"
+      "test/BaseFork.t.sol:testBaseNativeTransferGasAndResilientRedemption",
+      "test/BaseFork.t.sol:testBaseNativeLensPricesShares"
     ],
     "round_trip": {
       "bootstrap": "100 USDC exact-input purchase from each of the seven real stock pools; equal-dollar fixture, not index weights",
@@ -543,6 +544,13 @@
       "tool": "official base/base-anvil Base Foundry v1.1.0",
       "mint_usdc_raw": "70000034",
       "redeem_usdc_raw": "69929989"
+    },
+    "price_per_share": {
+      "lens": "src/M7CapLens.sol",
+      "block": 51869944,
+      "seed_usdc": "700",
+      "price_per_share_usd": "0.699684666665811566",
+      "stalest_price_age_seconds": 177208
     }
   },
   "uma_assertion_identifier": "ASSERT_TRUTH2",

@@ -5,6 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {M7CapVault} from "../src/M7CapVault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
+import {M7CapLens} from "../src/M7CapLens.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3, ICoinbaseOracleRegistry} from "../src/Valuation.sol";
 import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
@@ -64,14 +65,18 @@ contract Deploy is Script {
         );
         require(address(vault) == predictedVault, "CREATE nonce mismatch");
         USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
+        // Read-only price per share; replaceable at any time without touching the other contracts.
+        M7CapLens lens = new M7CapLens(controller);
         vm.stopBroadcast();
 
         require(
             address(controller.vault()) == address(vault) && vault.controller() == address(controller), "link"
         );
         require(address(gateway.vault()) == address(vault), "gateway");
+        require(address(lens.vault()) == address(vault) && lens.valuation() == valuation, "lens");
         console2.log("Vault", address(vault));
         console2.log("Gateway", address(gateway));
+        console2.log("Lens", address(lens));
         console2.log("Controller", address(controller));
         console2.log("Valuation", address(valuation));
         console2.log("Methodology keccak256:");

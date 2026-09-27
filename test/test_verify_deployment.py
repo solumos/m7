@@ -12,7 +12,7 @@ from verify_deployment import CONTRACTS, SEED_LOCK, WAD, compare_bytecode, decod
 MANIFEST = json.loads((ROOT / 'config/base.json').read_text())
 METHODOLOGY = b'# Methodology fixture\n'
 ADDRESSES = {'Valuation': '0x' + 'a1' * 20, 'IndexController': '0x' + 'a2' * 20,
-             'M7CapVault': '0x' + 'a3' * 20, 'USDCGateway': '0x' + 'a4' * 20}
+             'M7CapVault': '0x' + 'a3' * 20, 'USDCGateway': '0x' + 'a4' * 20, 'M7CapLens': '0x' + 'a5' * 20}
 DEPLOYER = '0x' + 'de' * 20
 SAFE = '0x' + '5a' * 20
 EXPECTED = {'deployer': DEPLOYER, 'bond_floor': 1_000 * 10**6, 'methodology': METHODOLOGY,
@@ -44,6 +44,7 @@ class FakeRPC:
         feeds = [s['feed'] for s in stocks] + [MANIFEST['usdc']['feed']]
         vault, controller = ADDRESSES['M7CapVault'], ADDRESSES['IndexController']
         gateway, valuation = ADDRESSES['USDCGateway'], ADDRESSES['Valuation']
+        lens = ADDRESSES['M7CapLens']
         a = lambda value: int(value, 16)
         self.answers = {
             (vault, 'name()', ()): text_words('MAG7 Cap Index'), (vault, 'symbol()', ()): text_words('M7CAP'),
@@ -65,6 +66,8 @@ class FakeRPC:
             (valuation, 'maxAge()', ()): [MANIFEST['risk_checks']['max_stock_feed_age_seconds']],
             (gateway, 'vault()', ()): [a(vault)], (gateway, 'router()', ()): [a(venue['router'])],
             (gateway, 'usdc()', ()): [a(assets[7])],
+            (lens, 'vault()', ()): [a(vault)], (lens, 'valuation()', ()): [a(valuation)],
+            (lens, 'pricePerShare()', ()): [WAD, 0],
         }
         for scope in ('sender', 'receiver', 'executor'):
             self.answers[(vault, scope + 'Scope()', ())] = [keccak_text('TRANSFER_%s_POLICY' % scope.upper())]

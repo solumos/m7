@@ -17,7 +17,7 @@ from ipfs_cid import raw_cid
 from verify_base import RPC, address, keccak_text
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS = ('Valuation', 'IndexController', 'M7CapVault', 'USDCGateway')
+CONTRACTS = ('Valuation', 'IndexController', 'M7CapVault', 'USDCGateway', 'M7CapLens')
 SEED_LOCK = '0x' + '00' * 19 + '01'
 WAD = 10**18
 
@@ -72,6 +72,7 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
 
     vault, controller = addresses['M7CapVault'], addresses['IndexController']
     gateway, valuation = addresses['USDCGateway'], addresses['Valuation']
+    lens = addresses['M7CapLens']
     for name in CONTRACTS:
         code = rpc.rpc('eth_getCode', [addresses[name], rpc.block['number']])
         deployed = code not in ('0x', '0x0')
@@ -125,6 +126,9 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
     check('gateway router', addr(gateway, 'router()'), venue['router'].lower())
     check('gateway usdc', addr(gateway, 'usdc()'), assets[7])
 
+    check('lens vault', addr(lens, 'vault()'), vault)
+    check('lens valuation', addr(lens, 'valuation()'), valuation)
+
     if seed is None:
         check('vault is unseeded', num(vault, 'totalSupply()'), 0)
     else:
@@ -136,6 +140,9 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
             check('backing %d equals the seed' % i, num(vault, 'backing(uint256)', i), seed['raw_amounts'][i])
             check('reserved %d is zero' % i, num(vault, 'reserved(uint256)', i), 0)
         check('quoteMint answers eight amounts', len(rpc.call(vault, 'quoteMint(uint256)', WAD)), 8)
+        per_share = rpc.call(lens, 'pricePerShare()')[0]
+        report['price_per_share_usd'] = '%.6f' % (per_share / WAD)
+        check('lens prices a share', per_share > 0, True)
     report['ok'] = not report['failures']
     return report
 
