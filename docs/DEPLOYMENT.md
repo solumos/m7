@@ -10,7 +10,7 @@ Every mainnet transaction is signed by the role's owner with a hardware wallet o
 
 | Role | Holds | Authority |
 |---|---|---|
-| Deployer, a fresh EOA used for nothing else until the deploy | about 0.01 ETH and the seed's USDC budget (about 1,030 USDC for a $1,000 seed) | Deploys the four contracts and calls `bootstrap` once; none afterwards |
+| Deployer, a fresh EOA used for nothing else until the deploy | about 0.01 ETH and the seed's USDC budget: the seed's value plus about 3% | Deploys the five contracts and calls `bootstrap` once; none afterwards |
 | Seed receiver, e.g. a 2-of-3 Safe on Base | the 990 unlocked seed shares | None: an ordinary holder |
 | Proposer | the UMA bond (at least 1,000 USDC, refunded 72 hours after an undisputed proposal) and gas | None: anyone may propose |
 | Dispute wallet | at least one bond in USDC and gas, reachable during every challenge window from Oct 1 | None: anyone may dispute |
@@ -61,7 +61,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 1. **Release commit.** Deploy only from a clean checkout of the reviewed release commit:
 
    ```sh
-   git switch release/v1 && git status --porcelain   # prints nothing
+   git switch main && git pull && git status --porcelain   # prints nothing
    make check                                          # all Solidity and Python tests pass
    ```
 
@@ -196,7 +196,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 1. Size the seed in the snapshot's exact ratios, so the first execution has nothing to do:
 
    ```sh
-   python3 scripts/seed_basket.py config/snapshot.json --usd 1000 --vault "$VAULT" --receiver "$SEED_RECEIVER"
+   python3 scripts/seed_basket.py config/snapshot.json --usd "$SEED_USD" --vault "$VAULT" --receiver "$SEED_RECEIVER"
    ```
 
    Review `config/seed.json` and fund the deployer with the printed `usdc_budget_for_acquire_seed`.
@@ -303,7 +303,7 @@ It holds no keys.
 **Setup.** Copy the release commit to the server from your machine (the server needs no repository access):
 
 ```sh
-git archive --format=tar release/v1 | ssh <server> 'sudo mkdir -p /opt/m7cap && sudo tar -x -C /opt/m7cap'
+git archive --format=tar main | ssh <server> 'sudo mkdir -p /opt/m7cap && sudo tar -x -C /opt/m7cap'
 ```
 
 Then, on the server:
