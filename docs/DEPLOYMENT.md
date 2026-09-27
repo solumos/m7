@@ -2,7 +2,7 @@
 
 This runbook deploys M7CAP to Base mainnet, seeds it, runs the first quarterly cycle and keeps it monitored. Each step gives the command, what a good result looks like, and when to stop.
 
-None of the four contracts has an owner, and none charges a fee. Nothing can pause, cap or upgrade them. A mistake after the bootstrap means a new deployment and asking holders to migrate. The contracts have not had an independent audit; launching without one is the owner's decision. Say so wherever the deployment is announced.
+None of the five contracts has an owner, and none charges a fee. Nothing can pause, cap or upgrade them. A mistake after the bootstrap means a new deployment and asking holders to migrate. The contracts have not had an independent audit; launching without one is the owner's decision. Say so wherever the deployment is announced.
 
 ## Roles and funding
 
@@ -73,7 +73,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
    done
    ```
 
-   All four tests must pass: the native bootstrap and gateway round trip, the live UMA bond lifecycle, the rebalance through the live pools, and transfers with the resilient exit.
+   All five tests must pass: the native bootstrap and gateway round trip, the live UMA bond lifecycle, the rebalance through the live pools, the lens's price per share, and transfers with the resilient exit.
 
 3. **Rehearsal.** Run the whole runbook against a local fork. It impersonates and funds throwaway accounts, and never broadcasts to mainnet:
 
@@ -238,7 +238,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
    cast send "$VAULT" 'transfer(address,uint256)' "$SEED_RECEIVER" 500000000000000000 --ledger --rpc-url "$BASE_RPC_URL"
    ```
 
-   Here `USDC` is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Expect about $3 spent on the mint (on a $1,000 seed a share is worth about $1), USDC back from the redemption, and every stock leg delivered in kind. `claimOf(ME)` must be all zero, and the gateway must hold no USDC.
+   Here `USDC` is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. A share is worth about `SEED_USD / 1000` dollars, so expect the mint to cost about three times that, then USDC back from the redemption, and every stock leg delivered in kind. `claimOf(ME)` must be all zero, and the gateway must hold no USDC.
 
 5. Commit `config/snapshot.json`, `config/seed.json` and `deployments/base-mainnet.json`.
 
