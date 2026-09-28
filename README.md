@@ -6,7 +6,7 @@ It is free software: no fee, no owner, no admin keys and no upgrades. Users pay 
 
 This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. The current code passes native B20 tests against live Base under both Beryl and Cobalt precompile rules, and a rehearsal of the mainnet runbook on a local fork. No live funds were spent. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the mainnet runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
 
-Two internal reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), record findings and reproductions for an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions. Their status sections say which findings still apply.
+A [third internal review](docs/AUDIT-3.md) covers the current equal-weight code: no path to take or dilute deposits was found, and it records two medium findings about the reset at larger sizes, with reproductions on live Base pools. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
 
 ## Run it
 
