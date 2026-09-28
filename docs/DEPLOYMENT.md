@@ -10,7 +10,7 @@ Every mainnet transaction is signed by the role's owner with a hardware wallet o
 
 | Role | Holds | Authority |
 |---|---|---|
-| Deployer, a fresh EOA used for nothing else until the deploy | about 0.01 ETH and the seed's USDC budget: the seed's value plus about 3% | Deploys the five contracts and calls `bootstrap` once; none afterwards |
+| Deployer, with its nonce reserved until all five creates finish | ETH covering refreshed gas estimates for deployment and launch, and the seed's USDC acquisition budget | Deploys the five contracts and calls `bootstrap` once; none afterwards |
 | Seed receiver, e.g. a 2-of-3 Safe on Base | the 990 unlocked seed shares | None: an ordinary holder |
 | Reset caller | gas, and receives the reset reward | None: anyone may trigger the quarterly reset |
 | Monitor server | an RPC URL and a webhook, no keys | Read-only |
@@ -124,10 +124,10 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    ```sh
    "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
-     --broadcast --slow --gas-estimate-multiplier 200 --verify --etherscan-api-key "$ETHERSCAN_API_KEY"
+     --broadcast --slow --gas-estimate-multiplier 200
    ```
 
-   If only the explorer verification fails, repeat it later with `--resume --verify` in place of `--broadcast`.
+   For the prepared local signer, replace `--ledger` with `--account m7-deployer`; enter its password only in your own terminal. Verify its address first with `cast wallet address --account m7-deployer`.
 
 4. Verify on chain and write the deployment record:
 
@@ -137,7 +137,27 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    Expect `"ok": true`, with every contract's `runtime code matches the local build`.
 
-5. Put `VAULT`, `CONTROLLER`, `GATEWAY` and `LENS` in `.env`. Point the monitor at `CONTROLLER`, `GATEWAY` and `LENS`, and confirm one heartbeat.
+5. Publish and verify all five contracts' source through [Sourcify](https://docs.sourcify.dev/docs/verify-via-foundry/). This needs no explorer API key and sends no blockchain transaction. Use the actual deployment record from step 4:
+
+   ```sh
+   python3 - <<'PY'
+   import json, os, subprocess
+   from pathlib import Path
+   record = json.loads(Path('deployments/base-mainnet.json').read_text())
+   assert record['chain_id'] == 8453
+   for name, contract in record['contracts'].items():
+       assert contract['status'] == '0x1' and contract['transaction']
+       subprocess.run([
+           os.environ['BASE_FORGE'], 'verify-contract', contract['address'],
+           f'src/{name}.sol:{name}', '--chain', '8453', '--verifier', 'sourcify',
+           '--creation-transaction-hash', contract['transaction'], '--watch',
+       ], check=True)
+   PY
+   ```
+
+   Require successful creation and runtime matches for every address before seeding. Review the result at `https://repo.sourcify.dev/8453/<address>`. If verification fails, diagnose and retry this step; do not redeploy merely to retry source publication. The pinned Base Forge was checked locally to send Sourcify v2 requests for all five contracts. This preflight is not a public verification result. Basescan verification with an Etherscan API key remains an optional additional publication.
+
+6. Put `VAULT`, `CONTROLLER`, `GATEWAY` and `LENS` in `.env`. Point the monitor at `CONTROLLER`, `GATEWAY` and `LENS`, and confirm one successful read in its logs (and a heartbeat if configured).
 
 **Abort rules:**
 - **A deploy transaction fails.** Stop. The contracts already created are inert: the controller is bound to a vault address nobody can deploy any more. After diagnosing, redeploy from the next nonce and redo Phase 1 for the new predicted addresses.
@@ -252,6 +272,17 @@ For the heartbeat, create a check (for example on healthchecks.io) that expects 
 ```sh
 */15 * * * * cd /opt/m7 && set -a && . /etc/m7/monitor.env && python3 scripts/monitor.py >> /var/log/m7-monitor.log 2>&1
 ```
+
+**User-service alternative.** When the SSH user already has `Linger=yes` (`loginctl show-user "$USER" -p Linger`), the monitor can run across logouts without a system service. Put the release source in `~/.local/share/m7`, a verified `cast` executable or symlink in its `bin/` directory, and install `ops/m7-monitor-user.service` as `~/.config/systemd/user/m7-monitor.service`. Copy the existing timer alongside it. Stage the monitor environment at `~/.config/m7/monitor.env` with mode 600. After deployment verification, fill in the actual addresses, configure alert delivery, rename it to `deployed.env`, then run:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user start m7-monitor.service
+journalctl --user -u m7-monitor.service -n 50
+systemctl --user enable --now m7-monitor.timer
+```
+
+Require a successful chain read and check the selected alert destination before enabling the timer. The launch organizer selected journal logs for initial alerts; leave the webhook and heartbeat blank and inspect `journalctl --user -u m7-monitor.service` regularly. This setup does not send notifications or detect the server going offline through an external heartbeat. Until `deployed.env` exists, the service skips its run. State and price history live in `~/.local/state/m7-monitor/`. Do not copy the deployer's `.env` or keystore to the server.
 
 **Alert levels:**
 

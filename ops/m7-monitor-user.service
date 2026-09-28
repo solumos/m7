@@ -1,0 +1,16 @@
+# User-service alternative to m7-monitor.service. Requires loginctl Linger=yes.
+# Install as ~/.config/systemd/user/m7-monitor.service with m7-monitor.timer.
+[Unit]
+Description=M7 reset and vault monitor (read-only)
+# Create this file only after checking the actual deployment addresses.
+ConditionPathExists=%h/.config/m7/deployed.env
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/m7
+EnvironmentFile=%h/.config/m7/deployed.env
+Environment=PATH=%h/.local/share/m7/bin:/usr/local/bin:/usr/bin:/bin
+Environment=STATE_FILE=%h/.local/state/m7-monitor/state.json
+ExecStart=/usr/bin/python3 scripts/monitor.py
+TimeoutStartSec=600
+NoNewPrivileges=true

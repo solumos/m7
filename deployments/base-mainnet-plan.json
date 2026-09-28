@@ -17,7 +17,39 @@
   "account_policy_preflight_block": 51896512,
   "account_policy_preflight_passed": true,
   "signer_configured": false,
+  "signer_preparation": {
+    "keystore_account": "m7-deployer",
+    "keystore_present": true,
+    "keystore_permissions": "0600",
+    "derived_address_verified": false
+  },
+  "funding_preflight": {
+    "block": 51897031,
+    "timestamp_utc": "2026-09-28T08:16:49Z",
+    "usdc_balance": "181.920276",
+    "eth_balance": "0.000266845134275612",
+    "nonce_latest": 7,
+    "nonce_pending": 7,
+    "seed_preview_block": 51897087,
+    "seed_acquisition_budget_usdc": "126.249994",
+    "seed_usdc_funding_available": true,
+    "refresh_gas_estimates_before_broadcast": true
+  },
   "production_monitor_configured": false,
+  "monitor_preparation": {
+    "service_installed": true,
+    "service_mode": "systemd_user_with_lingering",
+    "source_commit": "5368e595f0da3fb196089a37d34229893818792d",
+    "cast_release": "v1.8.3",
+    "server_python_tests_passed": 31,
+    "server_read_preflight_block": 51897303,
+    "server_read_preflight_passed": true,
+    "activation_guard_checked": true,
+    "timer_enabled": false,
+    "awaiting_verified_deployment_addresses": true,
+    "alert_delivery": "journal_logs_selected_by_launch_organizer",
+    "external_heartbeat_configured": false
+  },
   "post_cobalt_mainnet_validation_complete": false,
   "notes": [
     "Predictions were reproduced by a local-fork rehearsal, not production transactions.",
