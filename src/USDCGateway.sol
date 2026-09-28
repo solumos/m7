@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IM7CapVault} from "./interfaces/IM7CapVault.sol";
+import {IM7Vault} from "./interfaces/IM7Vault.sol";
 import {ISlipstreamRouter} from "./interfaces/ISlipstreamRouter.sol";
 
 /// @notice Atomic USDC entry and exit for one fixed basket, through the vault's pinned Slipstream pools.
@@ -13,7 +13,7 @@ import {ISlipstreamRouter} from "./interfaces/ISlipstreamRouter.sol";
 contract USDCGateway is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IM7CapVault public immutable vault;
+    IM7Vault public immutable vault;
     ISlipstreamRouter public immutable router;
     IERC20 public immutable usdc;
     IERC20 private immutable _stock0;
@@ -44,7 +44,7 @@ contract USDCGateway is ReentrancyGuard {
         address indexed caller, address indexed receiver, uint256 shares, uint256 usdcReceived
     );
 
-    constructor(IM7CapVault vault_) {
+    constructor(IM7Vault vault_) {
         if (address(vault_) == address(0)) revert InvalidConfiguration();
         vault = vault_;
         router = vault_.router();

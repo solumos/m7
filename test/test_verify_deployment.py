@@ -5,19 +5,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from ipfs_cid import raw_cid
 from verify_base import keccak_text
 from verify_deployment import CONTRACTS, SEED_LOCK, WAD, compare_bytecode, decode_string, from_broadcast, verify
 
 MANIFEST = json.loads((ROOT / 'config/base.json').read_text())
-METHODOLOGY = b'# Methodology fixture\n'
 ADDRESSES = {'Valuation': '0x' + 'a1' * 20, 'IndexController': '0x' + 'a2' * 20,
-             'M7CapVault': '0x' + 'a3' * 20, 'USDCGateway': '0x' + 'a4' * 20, 'M7CapLens': '0x' + 'a5' * 20}
+             'M7Vault': '0x' + 'a3' * 20, 'USDCGateway': '0x' + 'a4' * 20, 'M7Lens': '0x' + 'a5' * 20}
 DEPLOYER = '0x' + 'de' * 20
 SAFE = '0x' + '5a' * 20
-EXPECTED = {'deployer': DEPLOYER, 'bond_floor': 1_000 * 10**6, 'methodology': METHODOLOGY,
-            'methodology_uri': 'ipfs://' + raw_cid(METHODOLOGY)}
-SEED = {'vault': ADDRESSES['M7CapVault'], 'receiver': SAFE, 'raw_amounts': [10**8 + i for i in range(7)] + [0]}
+EXPECTED = {'deployer': DEPLOYER}
+SEED = {'vault': ADDRESSES['M7Vault'], 'receiver': SAFE, 'raw_amounts': [10**8 + i for i in range(7)] + [0]}
 
 
 def text_words(value):
@@ -42,12 +39,12 @@ class FakeRPC:
         stocks, venue = MANIFEST['stocks'], MANIFEST['venue']
         assets = [s['address'] for s in stocks] + [MANIFEST['usdc']['address']]
         feeds = [s['feed'] for s in stocks] + [MANIFEST['usdc']['feed']]
-        vault, controller = ADDRESSES['M7CapVault'], ADDRESSES['IndexController']
+        vault, controller = ADDRESSES['M7Vault'], ADDRESSES['IndexController']
         gateway, valuation = ADDRESSES['USDCGateway'], ADDRESSES['Valuation']
-        lens = ADDRESSES['M7CapLens']
+        lens = ADDRESSES['M7Lens']
         a = lambda value: int(value, 16)
         self.answers = {
-            (vault, 'name()', ()): text_words('MAG7 Cap Index'), (vault, 'symbol()', ()): text_words('M7CAP'),
+            (vault, 'name()', ()): text_words('M7 Equal Weight'), (vault, 'symbol()', ()): text_words('M7'),
             (vault, 'decimals()', ()): [18], (vault, 'router()', ()): [a(venue['router'])],
             (vault, 'factory()', ()): [a(venue['factory'])],
             (vault, 'policyRegistry()', ()): [a(MANIFEST['policy_registry'])],
@@ -56,11 +53,7 @@ class FakeRPC:
             (vault, 'balanceOf(address)', (SEED_LOCK,)): [10 * WAD],
             (vault, 'balanceOf(address)', (SAFE,)): [990 * WAD],
             (vault, 'quoteMint(uint256)', (WAD,)): [1] * 8,
-            (controller, 'vault()', ()): [a(vault)], (controller, 'oracle()', ()): [a(MANIFEST['uma_oo_v3'])],
-            (controller, 'bondCurrency()', ()): [a(assets[7])], (controller, 'bondFloor()', ()): [1_000 * 10**6],
-            (controller, 'valuation()', ()): [a(valuation)],
-            (controller, 'methodologyHash()', ()): [keccak_text(METHODOLOGY.decode())],
-            (controller, 'methodologyURI()', ()): text_words('ipfs://' + raw_cid(METHODOLOGY)),
+            (controller, 'vault()', ()): [a(vault)], (controller, 'valuation()', ()): [a(valuation)],
             (valuation, 'sequencer()', ()): [a(MANIFEST['sequencer_feed'])],
             (valuation, 'registry()', ()): [a(MANIFEST['registry'])],
             (valuation, 'maxAge()', ()): [MANIFEST['risk_checks']['max_stock_feed_age_seconds']],
@@ -96,17 +89,17 @@ class VerifyDeploymentTest(unittest.TestCase):
         report = verify(FakeRPC(), MANIFEST, ADDRESSES, EXPECTED, artifacts)
         self.assertEqual(report['failures'], [])
         self.assertTrue(report['ok'])
-        self.assertFalse(report['metadata_matches']['M7CapVault'])  # only the metadata trailer differs
+        self.assertFalse(report['metadata_matches']['M7Vault'])  # only the metadata trailer differs
 
-    def test_detects_wrong_gateway_uri_and_binding(self):
-        vault, controller = ADDRESSES['M7CapVault'], ADDRESSES['IndexController']
+    def test_detects_wrong_bindings(self):
+        vault, controller = ADDRESSES['M7Vault'], ADDRESSES['IndexController']
         rpc = FakeRPC({(ADDRESSES['USDCGateway'], 'vault()', ()): [1],
-                       (controller, 'methodologyURI()', ()): text_words('ipfs://publish-the-reviewed-methodology-here'),
+                       (controller, 'valuation()', ()): [2],
                        (vault, 'controller()', ()): [1]})
         report = verify(rpc, MANIFEST, ADDRESSES, EXPECTED)
         self.assertFalse(report['ok'])
         self.assertIn('gateway vault', report['failures'])
-        self.assertIn('controller methodology URI is the raw CID of the file', report['failures'])
+        self.assertIn('controller valuation', report['failures'])
         self.assertIn('vault controller', report['failures'])
 
     def test_bootstrapped_state_is_checked_against_the_seed(self):
@@ -125,7 +118,7 @@ class VerifyDeploymentTest(unittest.TestCase):
         self.assertEqual(compare_bytecode('0x60', artifact(BUILT)), (False, False))
 
     def test_decode_string_rejects_malformed_words(self):
-        self.assertEqual(decode_string(text_words('M7CAP')), 'M7CAP')
+        self.assertEqual(decode_string(text_words('M7')), 'M7')
         with self.assertRaises(ValueError):
             decode_string([64, 5, 0])
         with self.assertRaises(ValueError):
@@ -143,7 +136,7 @@ class VerifyDeploymentTest(unittest.TestCase):
             path.write_text(json.dumps({'transactions': transactions, 'receipts': receipts}))
             contracts, deployer = from_broadcast(path)
             self.assertEqual(deployer, DEPLOYER)
-            self.assertEqual(contracts['M7CapVault']['block'], 102)
+            self.assertEqual(contracts['M7Vault']['block'], 102)
             path.write_text(json.dumps({'transactions': transactions[:3], 'receipts': receipts}))
             with self.assertRaises(ValueError):
                 from_broadcast(path)

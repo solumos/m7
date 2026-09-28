@@ -7,7 +7,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IM7CapVault} from "./interfaces/IM7CapVault.sol";
+import {IM7Vault} from "./interfaces/IM7Vault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "./interfaces/ISlipstreamRouter.sol";
 import {IB20Policy, IPolicyRegistry, IControllerBinding} from "./interfaces/IB20Policy.sol";
 import {Swap} from "./Types.sol";
@@ -16,7 +16,7 @@ import {Swap} from "./Types.sol";
 /// @dev No owner, upgrade, fees, rescue, or unbacked mint. The immutable controller may only rebalance, and only
 ///      through each stock's pinned USDC pool. Receipt transfers mirror the constituents' B20 transfer policies.
 ///      Balances owed to earlier redeemers (`reserved`) are excluded from all backing.
-contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
+contract M7Vault is ERC20, ReentrancyGuard, IM7Vault {
     using SafeERC20 for IERC20;
 
     uint256 public constant INITIAL_SHARES = 1_000e18;
@@ -88,6 +88,7 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
     event ClaimWithdrawn(address indexed owner, uint256 indexed index, address indexed to, uint256 amount);
     event BasketRebalanced(uint256 swaps);
     event RebalanceLeg(uint8 indexed tokenIn, uint8 indexed tokenOut, uint256 amountIn, uint256 amountOut);
+    event RewardPaid(address indexed to, uint256 amount);
 
     constructor(
         IERC20[8] memory assets_,
@@ -97,7 +98,7 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
         ISlipstreamFactory factory_,
         IPolicyRegistry policyRegistry_,
         address bootstrapper_
-    ) ERC20("MAG7 Cap Index", "M7CAP") {
+    ) ERC20("M7 Equal Weight", "M7") {
         if (
             controller_ == address(0) || bootstrapper_ == address(0) || address(router_) == address(0)
                 || address(factory_) == address(0) || address(policyRegistry_) == address(0)
@@ -351,7 +352,7 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
         emit ClaimWithdrawn(msg.sender, index, to, amount);
     }
 
-    /// @dev The immutable controller plans every leg and enforces its accepted target and loss bounds. Each call is
+    /// @dev The immutable controller plans every leg and enforces its target and loss bounds. Each call is
     ///      one direction (all stock->USDC or all USDC->stock), each stock at most once, through pinned pools only.
     ///      There are no external callbacks while the vault is unlocked during this batch.
     function rebalance(Swap[] calldata swaps, uint256 deadline) external nonReentrant {
@@ -386,6 +387,19 @@ contract M7CapVault is ERC20, ReentrancyGuard, IM7CapVault {
             if (assets(i).balanceOf(address(this)) < before[i]) _checkLockedBacking(i, backing(i), supply);
         }
         emit BasketRebalanced(legs);
+    }
+
+    /// @notice Pays the controller's bounded quarterly-reset reward in USDC. Only the immutable controller can call it,
+    ///         and it never touches amounts owed to earlier redeemers.
+    function payReward(address to, uint256 amount) external nonReentrant {
+        if (msg.sender != controller) revert Unauthorized();
+        _checkReceiver(to);
+        if (amount == 0 || amount > backing(7)) revert ExceedsBacking(7);
+        IERC20 usdc = assets(7);
+        uint256 beforeBalance = usdc.balanceOf(address(this));
+        usdc.safeTransfer(to, amount);
+        if (beforeBalance - usdc.balanceOf(address(this)) != amount) revert TransferMismatch(7);
+        emit RewardPaid(to, amount);
     }
 
     function _swap(Swap calldata trade, uint256 stock, uint256 deadline) private {

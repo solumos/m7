@@ -3,33 +3,25 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3} from "../src/Valuation.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
-import {
-    ControllerToken,
-    ControllerFeed,
-    ControllerRegistry,
-    ControllerOracle
-} from "./mocks/ControllerMocks.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
+import {ControllerToken, ControllerFeed, ControllerRegistry} from "./mocks/ControllerMocks.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {PricedVenue} from "./mocks/RouterMocks.sol";
 
 /// @dev Second-review reproductions, converted to regressions after the fixes (docs/AUDIT-2.md).
 contract Audit2Test is Test {
-    M7CapVault vault;
+    M7Vault vault;
     USDCGateway gateway;
     IndexController controller;
     Valuation valuation;
-    ControllerOracle oracle;
     PricedVenue router;
     IERC20[8] assets;
     ControllerFeed[8] feeds;
-    uint256[7] equal;
     uint32 constant QUARTER = 2026 * 4 + 3;
-    bytes32 constant DIGEST = keccak256("observations");
 
     function setUp() public {
         vm.warp(1790870400); // Thursday Oct 1 2026 16:00 UTC
@@ -44,15 +36,12 @@ contract Audit2Test is Test {
             aggregators[i] = feeds[i];
             if (i < 7) {
                 seed[i] = 100e8; // 100 tokens x $100 = $10,000 per stock, $70,000 NAV
-                equal[i] = uint256(1e18) / 7;
                 spacings[i] = 10;
             }
         }
-        equal[6] += uint256(1e18) % 7;
         valuation = new Valuation(
             addresses, aggregators, new ControllerFeed(0, 0), new ControllerRegistry(), 25 hours
         );
-        oracle = new ControllerOracle();
         router = new PricedVenue(addresses[7]);
         for (uint256 i; i < 7; ++i) {
             router.setRate(addresses[i], 1e18); // $100, 8 decimals: one raw unit per raw USDC unit
@@ -61,36 +50,24 @@ contract Audit2Test is Test {
         PolicyRegistryMock registry = new PolicyRegistryMock();
         address predictedVault =
             vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
-        controller = new IndexController(
-            IM7CapVault(predictedVault),
-            oracle,
-            assets[7],
-            1000e6,
-            keccak256("methodology"),
-            "ipfs://m",
-            valuation
-        );
-        vault = new M7CapVault(assets, spacings, address(controller), router, router, registry, address(this));
+        controller = new IndexController(IM7Vault(predictedVault), valuation);
+        vault = new M7Vault(assets, spacings, address(controller), router, router, registry, address(this));
         assertEq(address(vault), predictedVault);
-        gateway = new USDCGateway(IM7CapVault(address(vault)));
+        gateway = new USDCGateway(IM7Vault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             ControllerToken(addresses[i]).mint(address(this), 1e15);
             ControllerToken(addresses[i]).mint(address(router), 1e15);
             assets[i].approve(address(vault), type(uint256).max);
         }
-        assets[7].approve(address(controller), type(uint256).max);
         assets[7].approve(address(gateway), type(uint256).max);
         vault.approve(address(gateway), type(uint256).max);
         vault.bootstrap(seed, address(this));
     }
 
-    function _accept(uint256[7] memory ratios) private returns (bytes32 id) {
-        id = controller.propose(QUARTER, ratios, "ipfs://evidence", DIGEST);
-        vm.warp(1791216000); // Monday Oct 5 16:00 UTC, after the 72h liveness
-        for (uint256 i; i < 8; ++i) {
-            feeds[i].set(i == 7 ? int256(1e8) : int256(100e8), block.timestamp);
-        }
-        assertTrue(controller.settle(id));
+    /// Moves stock `index` to `dollars` in both the oracle and the venue.
+    function _price(uint256 index, uint256 dollars) private {
+        feeds[index].set(int256(dollars * 1e8), block.timestamp);
+        router.setRate(address(assets[index]), dollars * 1e16);
     }
 
     function _nav() private view returns (uint256 nav) {
@@ -121,57 +98,31 @@ contract Audit2Test is Test {
     }
 
     function testAudit2RouterEthDustNoLongerBlocksRebalance() public {
-        uint256[7] memory target = equal;
-        target[0] += 0.01e18;
-        target[1] -= 0.01e18;
-        _accept(target);
+        _price(0, 110);
         _leaveOneWeiInRouter();
-        controller.execute(block.timestamp);
+        controller.rebalance(block.timestamp, address(0));
         assertTrue(controller.executedQuarter(QUARTER));
         assertEq(address(vault).balance, 1);
     }
 
-    // N-03 regression: an unchallenged false assertion moves the basket by at most one bounded step.
-    function testAudit2FalseAssertionMovesAtMostOneStep() public {
-        uint256[7] memory bogus;
-        for (uint256 i = 1; i < 7; ++i) {
-            bogus[i] = 1; // 1e-18 "quantity" per stock is still accepted by propose()
-        }
-        bogus[0] = 1e18 - 6;
-        _accept(bogus);
-        uint256 navBefore = _nav();
-        router.setHaircuts(0, 50); // the venue keeps 0.5% of every purchase
-        vm.prank(address(0xE0A)); // permissionless executor, no role or stake
-        controller.execute(block.timestamp);
-
-        // Formerly 99.99% of NAV moved into one stock. Now stock 0 gains one 5% step, less the haircut.
-        assertApproxEqAbs(assets[0].balanceOf(address(vault)), 104.975e8, 10);
-        for (uint256 i = 1; i < 7; ++i) {
-            assertApproxEqAbs(assets[i].balanceOf(address(vault)), 99.1666667e8, 10);
-        }
-        // $2.50 kept by the venue: 0.5% of the $500 bought, versus 0.43% of NAV before the fix.
-        assertApproxEqAbs(navBefore - _nav(), 2.5e18, 1e14);
-    }
-
     // N-06 regressions: the controller plans from current balances, so interim flows cannot invalidate a plan.
     function testAudit2PlannerSurvivesLargeRedemptionBeforeExecution() public {
-        uint256[7] memory target = equal;
-        target[0] += 0.05e18;
-        target[1] -= 0.05e18;
-        _accept(target);
+        _price(0, 105);
         uint256[8] memory noMinimum;
         vault.redeemBasket(vault.totalSupply() * 40 / 100, noMinimum, address(this), block.timestamp);
-        controller.execute(block.timestamp);
-        assertApproxEqAbs(assets[0].balanceOf(address(vault)), 63e8, 10); // 60 tokens + one 5% step
-        assertApproxEqAbs(assets[1].balanceOf(address(vault)), 57e8, 10);
+        controller.rebalance(block.timestamp, address(0));
+        // 60 tokens of each remain; the reset brings AAPL back to the average value at $105.
+        uint256 nav = _nav();
+        assertApproxEqRel(assets[0].balanceOf(address(vault)) * 105e10, nav / 7, 0.003e18);
+        assertApproxEqRel(assets[1].balanceOf(address(vault)) * 100e10, nav / 7, 0.003e18);
     }
 
     function testAudit2PlannerDeploysDonatedCash() public {
-        _accept(equal);
-        require(assets[7].transfer(address(vault), 15e6)); // formerly tripped the 1 bp residual-cash check
-        controller.execute(block.timestamp);
+        require(assets[7].transfer(address(vault), 15e6)); // above the 1 bp cash cap of $7
+        controller.rebalance(block.timestamp, address(0xBEEF));
         assertTrue(controller.executedQuarter(QUARTER));
-        assertLe(assets[7].balanceOf(address(vault)), controller.MIN_LEG_USDC());
+        assertLe(assets[7].balanceOf(address(vault)), 7 * controller.MIN_LEG_USDC());
+        assertEq(assets[7].balanceOf(address(0xBEEF)), 3.50075e6); // 0.5 bp of $70,015
     }
 
     // Verified property: quarterAt agrees with an independent Gregorian algorithm.

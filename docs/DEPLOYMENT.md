@@ -1,6 +1,6 @@
-# M7CAP mainnet deployment runbook
+# M7 mainnet deployment runbook
 
-This runbook deploys M7CAP to Base mainnet, seeds it, runs the first quarterly cycle and keeps it monitored. Each step gives the command, what a good result looks like, and when to stop.
+This runbook deploys M7 to Base mainnet, seeds it, runs the first quarterly reset and keeps it monitored. Each step gives the command, what a good result looks like, and when to stop.
 
 None of the five contracts has an owner, and none charges a fee. Nothing can pause, cap or upgrade them. A mistake after the bootstrap means a new deployment and asking holders to migrate. The contracts have not had an independent audit; launching without one is the owner's decision. Say so wherever the deployment is announced.
 
@@ -12,16 +12,12 @@ Every mainnet transaction is signed by the role's owner with a hardware wallet o
 |---|---|---|
 | Deployer, a fresh EOA used for nothing else until the deploy | about 0.01 ETH and the seed's USDC budget: the seed's value plus about 3% | Deploys the five contracts and calls `bootstrap` once; none afterwards |
 | Seed receiver, e.g. a 2-of-3 Safe on Base | the 990 unlocked seed shares | None: an ordinary holder |
-| Proposer | the UMA bond (at least 1,000 USDC, refunded 72 hours after an undisputed proposal) and gas | None: anyone may propose |
-| Dispute wallet | at least one bond in USDC and gas, reachable during every challenge window from Oct 1 | None: anyone may dispute |
-| Settler and executor | gas | None: anyone may settle or execute |
+| Reset caller | gas, and receives the reset reward | None: anyone may trigger the quarterly reset |
 | Monitor server | an RPC URL and a webhook, no keys | Read-only |
-
-The controller address alone decides nothing: a stranger can propose on the first day of a quarter. Keep the dispute wallet funded and the monitor running from the moment the controller exists.
 
 ## Toolchain
 
-The Valuation and vault constructors, AcquireSeed, Bootstrap and Execute call Base's B20 precompiles. Stock Forge cannot simulate those calls, so every script on the deploy path runs with Base's Foundry build, base-anvil. Stock Foundry stays in use for `make check` and `cast`.
+The Valuation and vault constructors, AcquireSeed, Bootstrap and the reset call Base's B20 precompiles. Stock Forge cannot simulate those calls, so every script on the deploy path runs with Base's Foundry build, base-anvil. Stock Foundry stays in use for `make check` and `cast`.
 
 Install the pinned base-anvil build and verify its provenance:
 
@@ -50,11 +46,9 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 |---|---|
 | Now to Tue Sep 29 | Phase 0: preparation |
 | Wed Sep 30, 18:00 | Cobalt hard fork activates on Base mainnet |
-| Wed Sep 30, 20:00 | Reference close for the Sep 30 review (proposal quarter 8107, Oct–Dec) |
-| Thu Oct 1 | Phase 1: go/no-go on post-Cobalt state; draft the observations |
-| Oct 1–2 | Phase 2: observations reviewed and published. Phase 3: deploy |
-| Fri Oct 2, US market hours | Phase 4: seed, bootstrap, smoke tests, propose, announce |
-| Mon Oct 5 onward | Phase 5: settle and execute the first cycle |
+| Thu Oct 1 | Phase 1: go/no-go on post-Cobalt state. Phase 2: deploy |
+| Oct 1–2, US market hours | Phase 3: seed, bootstrap, smoke tests, first reset, announce |
+| Every quarter | Phase 4: the quarterly reset |
 
 ## Phase 0: preparation
 
@@ -73,9 +67,9 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
    done
    ```
 
-   All five tests must pass: the native bootstrap and gateway round trip, the live UMA bond lifecycle, the rebalance through the live pools, the lens's price per share, and transfers with the resilient exit.
+   All four tests must pass: the native bootstrap and gateway round trip, the lens's price per share, a reset to equal weights through the live pools, and transfers with the resilient exit. A failure mentioning `over rate limit` is the endpoint, not the code: run the tests one at a time and throttled, by adding `-j 1` and prefixing `FOUNDRY_COMPUTE_UNITS_PER_SECOND=20 FOUNDRY_FORK_RETRIES=30 FOUNDRY_FORK_RETRY_BACKOFF=3000`.
 
-3. **Rehearsal.** Run the whole runbook against a local fork. It impersonates and funds throwaway accounts, and never broadcasts to mainnet:
+3. **Rehearsal.** Run the runbook against a local fork. It impersonates and funds throwaway accounts, and never broadcasts to mainnet:
 
    ```sh
    BASE_RPC_URL=https://mainnet.base.org \
@@ -83,26 +77,9 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
      script/rehearse.sh
    ```
 
-   It must end with `Rehearsal passed`. The fork source must serve recent history: `mainnet.base.org` does when throttled as above, and so may your private endpoint. The rehearsal applies Cobalt's rules by default; set `BASE_UPGRADE=beryl` for the rules mainnet runs before activation. With `DEPLOYER` set to the real deployer, it previews the exact mainnet addresses.
+   It must end with `Rehearsal passed`. Its last step is the first reset with the `Rebalance` script: inside the execution window (a weekday, 15:00–20:00 UTC) the reset runs on the fork; outside it, the valuation must refuse it and change nothing. The fork source must serve recent history: `mainnet.base.org` does when throttled as above, and so may your private endpoint. The rehearsal applies Cobalt's rules by default; set `BASE_UPGRADE=beryl` for the rules mainnet runs before activation. With `DEPLOYER` set to the real deployer, it previews the exact mainnet addresses.
 
-4. **Bond floor.** `BOND_FLOOR_USDC` is immutable. A false, undisputed proposal can cost holders at most about 0.1–0.2% of NAV per quarter, so a 1,000 USDC bond deters it only up to roughly $0.5–1M of NAV. Raise it before deploying if you expect more. Dispute capital must match the bond.
-
-5. **Methodology.** Freeze `docs/METHODOLOGY.md`: its exact bytes are hashed into the controller, `Propose` checks the hash, and any later edit needs a new deployment. Publish it at its raw CIDv1, the only URI the deploy script accepts:
-
-   ```sh
-   python3 scripts/ipfs_cid.py docs/METHODOLOGY.md --car methodology.car   # prints ipfs://bafkrei...
-   ipfs add --cid-version=1 docs/METHODOLOGY.md                           # kubo prints the same CID
-   ```
-
-   Pin that CID on at least two independent services: `ipfs pin remote add`, or upload `methodology.car` to a service that imports CARs. Then confirm public gateways serve the exact bytes:
-
-   ```sh
-   python3 scripts/ipfs_cid.py docs/METHODOLOGY.md --gateway https://ipfs.io --gateway https://dweb.link
-   ```
-
-   Every gateway must report `identical bytes`. Set `METHODOLOGY_URI` to the printed URI. A claim is false if the document is unavailable, so keep the pins for the life of the deployment.
-
-6. **Wallets and services.** Create and fund the roles above. Set `DEPLOYER` and `SEED_RECEIVER` in `.env`. Set up the monitor server (see [Monitoring](#monitoring)) and test its webhook.
+4. **Wallets and services.** Create and fund the roles above. Set `DEPLOYER`, `SEED_RECEIVER` and `SEED_USD` in `.env`. Set up the monitor server (see [Monitoring](#monitoring)) and test its webhook.
 
 ## Phase 1: go/no-go after Cobalt (Oct 1)
 
@@ -123,34 +100,11 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    Expect exit 0 with `read_checks_passed: true` and `policy_zero_authorized: true`.
 
-3. Re-run the native tests and the rehearsal (Phase 0, steps 2 and 3). They now fork a post-activation block.
+3. Re-run the native tests and the rehearsal (Phase 0, steps 2 and 3). They now fork a post-activation block. Run the rehearsal between 15:00 and 20:00 UTC so that it also runs the first reset.
 
 **Go** only if all three pass.
 
-## Phase 2: observations and snapshot
-
-1. Draft `observations.json` for the Sep 30, 2026 review, following [the methodology](METHODOLOGY.md):
-   - share counts from SEC filings published by the cutoff;
-   - official closes at the 20:00 UTC reference close;
-   - the token feed rounds and each B20 multiplier effective at that close, read at that block because Cobalt schedules multiplier changes.
-
-   An independent reviewer checks every number against its source URL.
-
-2. Compile it and check the digest:
-
-   ```sh
-   python3 scripts/index_snapshot.py observations.json --canonical-out observations.canonical.json \
-     > config/snapshot.json
-   sha256sum observations.canonical.json   # equals observation_sha256 in config/snapshot.json
-   ```
-
-   `quarter_id` must be 8107.
-
-3. Publish `observations.json`, `observations.canonical.json` and `config/snapshot.json` together as one IPFS directory (`ipfs add -r --cid-version=1 evidence/`), and pin it twice. Set `EVIDENCE_URI=ipfs://<directory CID>`.
-
-4. Copy `config/snapshot.json` to the monitor server as its `EXPECTED_SNAPSHOT`.
-
-## Phase 3: deploy
+## Phase 2: deploy
 
 1. Build with the deploying toolchain. The verifier compares bytecode with this build:
 
@@ -164,9 +118,9 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
    "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --sender "$DEPLOYER"
    ```
 
-   Check that the logged `Vault` equals `$VAULT_PREDICTED`. The run must end `SIMULATION COMPLETE`. A wrong `METHODOLOGY_URI` stops here.
+   Check that the logged `Vault` equals `$VAULT_PREDICTED`. The run must end `SIMULATION COMPLETE`.
 
-3. Broadcast five transactions: the Valuation, controller, vault and gateway, then the read-only price lens. Send nothing else from the deployer until all five are mined:
+3. Broadcast five transactions: the Valuation, controller, vault and gateway, then the read-only lens. Send nothing else from the deployer until all five are mined:
 
    ```sh
    "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
@@ -189,19 +143,17 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 - **A deploy transaction fails.** Stop. The contracts already created are inert: the controller is bound to a vault address nobody can deploy any more. After diagnosing, redeploy from the next nonce and redo Phase 1 for the new predicted addresses.
 - **`verify_deployment.py` fails.** Never fund that deployment. Redeploy.
 
-## Phase 4: seed, bootstrap and smoke tests
+## Phase 3: seed, bootstrap, smoke tests and the first reset
 
 Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and pools track prices.
 
-1. Size the seed in the snapshot's exact ratios, so the first execution has nothing to do:
+1. Size an equal-value seed at current prices:
 
    ```sh
-   python3 scripts/seed_basket.py config/snapshot.json --usd "$SEED_USD" --vault "$VAULT" --receiver "$SEED_RECEIVER"
+   python3 scripts/seed_basket.py --usd "$SEED_USD" --vault "$VAULT" --receiver "$SEED_RECEIVER"
    ```
 
-   Review `config/seed.json` and fund the deployer with the printed `usdc_budget_for_acquire_seed`.
-
-   **Seed size.** Every stock needs at least 0.01 tokens, so the seed must be worth at least about $100. META, with a high price and a small quantity weight, sets the limit, and the script refuses a smaller seed and prints the minimum. Only 1% of the seed stays locked for good. Rebalances need more: the planner skips trades under $0.10, so below about $500 of total value a typical quarter's buyback-sized changes cannot be carried out and `execute` reverts `NotCompliant`. Nothing is lost when that happens; the basket keeps its quantities. The seed's own quarter needs no trades. If outside minting has not brought the vault past about $500 before the first real rebalance in January, mint the difference yourself through the gateway. It charges no fee, and those shares stay redeemable at any time.
+   Review `config/seed.json` and fund the deployer with the printed `usdc_budget_for_acquire_seed`. Every stock needs at least 0.01 tokens, so the seed must be worth at least about $53 at current prices; the script refuses a smaller seed and prints the minimum. Only 1% of the seed stays locked for good.
 
 2. Buy the seed through the vault's pinned pools. Simulate first, then broadcast. Each of the seven purchases is an approval, a swap and an approval reset:
 
@@ -223,16 +175,16 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 
    The verifier must report `"ok": true`: 1,000 shares with 10 locked, 990 held by the seed receiver, backing equal to the seed, and no reserves. Its `price_per_share_usd` should be about the seed's value divided by 1,000.
 
-4. Smoke tests from a small operator wallet (`ME`) holding about 20 USDC, not the deployer:
+4. Smoke tests from a small operator wallet (`ME`) holding about 20 USDC, not the deployer. The gateway calls run seven swaps, so give them an explicit gas limit:
 
    ```sh
    D=$(( $(date +%s) + 1800 ))
    cast send "$USDC" 'approve(address,uint256)' "$GATEWAY" 20000000 --ledger --rpc-url "$BASE_RPC_URL"
    cast send "$GATEWAY" 'mintWithUSDC(uint256,uint256,address,uint256)' 3000000000000000000 20000000 "$ME" "$D" \
-     --ledger --rpc-url "$BASE_RPC_URL"
+     --gas-limit 4000000 --ledger --rpc-url "$BASE_RPC_URL"
    cast send "$VAULT" 'approve(address,uint256)' "$GATEWAY" 1000000000000000000 --ledger --rpc-url "$BASE_RPC_URL"
    cast send "$GATEWAY" 'redeemToUSDC(uint256,uint256,address,uint256)' 1000000000000000000 0 "$ME" "$D" \
-     --ledger --rpc-url "$BASE_RPC_URL"
+     --gas-limit 4000000 --ledger --rpc-url "$BASE_RPC_URL"
    cast send "$VAULT" 'redeemBasketWithClaims(uint256,uint256[8],address,uint256)' 1000000000000000000 \
      '[0,0,0,0,0,0,0,0]' "$ME" "$D" --ledger --rpc-url "$BASE_RPC_URL"
    cast send "$VAULT" 'transfer(address,uint256)' "$SEED_RECEIVER" 500000000000000000 --ledger --rpc-url "$BASE_RPC_URL"
@@ -240,7 +192,16 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 
    Here `USDC` is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. A share is worth about `SEED_USD / 1000` dollars, so expect the mint to cost about three times that, then USDC back from the redemption, and every stock leg delivered in kind. `claimOf(ME)` must be all zero, and the gateway must hold no USDC.
 
-5. Commit `config/snapshot.json`, `config/seed.json` and `deployments/base-mainnet.json`.
+5. **First reset.** This quarter's reset is due as soon as the vault exists. On a weekday between 15:00 and 20:00 UTC:
+
+   ```sh
+   EXECUTOR=$ME "$BASE_FORGE" script script/Maintain.s.sol:Rebalance --rpc-url "$BASE_RPC_URL" --ledger \
+     --sender "$ME" --broadcast --gas-estimate-multiplier 200
+   ```
+
+   The seed is already close to equal value, so expect little or no trading; `rebalanceDue()` becomes false. A revert changes nothing (`OutsideExecutionWindow`, `NoFreshMarketSignal`, `Too little received`, `NotCompliant`); retry later.
+
+6. Commit `config/seed.json` and `deployments/base-mainnet.json`, then tag the deployed commit and push the tag: `git tag -a v1.0.0 <commit in deployments/base-mainnet.json> && git push origin v1.0.0`.
 
 **Abort rule:** if a smoke test fails, don't announce. The seed receiver can take the seed out in kind with `redeemBasketWithClaims`.
 
@@ -248,51 +209,19 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 
 Once the smoke tests pass and the monitor is running, publish:
 - the five addresses, with links to their verified source;
-- `METHODOLOGY_URI` and the evidence URI;
-- that there is no fee and no owner;
+- the rules ([METHODOLOGY.md](METHODOLOGY.md)): equal weight, reset quarterly by anyone, no fee and no owner;
 - the risks, including that there has been no independent audit.
 
-## Phase 5: first quarterly cycle (quarter 8107)
+## Phase 4: the quarterly reset
 
-1. **Propose.** The proposer holds at least `max(bond floor, UMA minimum)` USDC. The script syncs UMA's parameters, approves the bond and proposes: three transactions.
-
-   ```sh
-   "$BASE_FORGE" script script/Maintain.s.sol:Propose --rpc-url "$BASE_RPC_URL" --ledger --sender "$PROPOSER" \
-     --broadcast --slow
-   ```
-
-   It refuses a changed methodology file, a snapshot for another quarter, or a quarter that already has a live proposal. It prints the assertion ID. The monitor should show only info alerts: challenge window open, ratios and digest matching.
-
-2. **Settle** after the 72-hour challenge window. Anyone may:
-
-   ```sh
-   ASSERTION_ID=$(cast call "$CONTROLLER" 'latestProposal(uint32)(bytes32)' 8107 --rpc-url "$BASE_RPC_URL")
-   ASSERTION_ID=$ASSERTION_ID "$BASE_FORGE" script script/Maintain.s.sol:Settle --rpc-url "$BASE_RPC_URL" --ledger \
-     --sender "$EXECUTOR" --broadcast
-   ```
-
-3. **Execute** on a weekday, 15:00–20:00 UTC, while at least one stock feed has updated within the hour:
-
-   ```sh
-   "$BASE_FORGE" script script/Maintain.s.sol:Execute --rpc-url "$BASE_RPC_URL" --ledger --sender "$EXECUTOR" \
-     --broadcast
-   ```
-
-   The seed already matches the ratios, so no trades are expected and `executedQuarter(8107)` becomes true. A revert changes nothing (`OutsideExecutionWindow`, `NoFreshMarketSignal`, `Too little received`, `NotCompliant`); retry later in the quarter.
-
-4. Tag the deployed commit and push the tag: `git tag -a v1.0.0 <commit in deployments/base-mainnet.json> && git push origin v1.0.0`.
-
-**Every quarter after this:**
-- compile and review the new observations after the quarter-end close;
-- replace `EXPECTED_SNAPSHOT` on the monitor server;
-- propose, settle and execute, allowing the 72-hour challenge window and a weekday execution window.
+Each calendar quarter, anyone triggers the reset once, on a weekday between 15:00 and 20:00 UTC. Once the vault is large enough, the reward (0.5 bp of NAV, up to $25) should attract others to do it; until then, run the `Rebalance` script above yourself early in the quarter. The monitor alerts when a quarter's reset is still undone a week in, and as critical with 21 days or fewer left. If a whole quarter passes without a reset, nothing breaks: the basket keeps its quantities until the next one.
 
 ## Monitoring
 
 `scripts/monitor.py` runs every 15 minutes from a systemd timer on an always-on Linux server. It:
-- reads the controller with `watch_index.py`;
-- records the price per share from the lens in `price-history.jsonl` beside its state file;
-- alerts if backing per share falls outside a rebalance (an issuer seizure or burn), if new minting is blocked, or if deferred claims are outstanding;
+- checks whether this quarter's reset has run;
+- records the price per share and weights from the lens in `price-history.jsonl` beside its state file;
+- alerts if backing per share falls outside a reset (an issuer seizure or burn), if new minting is blocked, or if deferred claims are outstanding;
 - runs the `verify_base.py` read checks hourly, with the vault and gateway as policy accounts;
 - posts new alerts to a Slack or Discord webhook;
 - repeats open critical alerts every six hours and announces cleared ones;
@@ -303,60 +232,53 @@ It holds no keys.
 **Setup.** Copy the release commit to the server from your machine (the server needs no repository access):
 
 ```sh
-git archive --format=tar main | ssh <server> 'sudo mkdir -p /opt/m7cap && sudo tar -x -C /opt/m7cap'
+git archive --format=tar main | ssh <server> 'sudo mkdir -p /opt/m7 && sudo tar -x -C /opt/m7'
 ```
 
 Then, on the server:
 
 ```sh
-sudo useradd --system --create-home m7cap
-sudo -u m7cap sh -c 'curl -L https://foundry.paradigm.xyz | bash && ~/.foundry/bin/foundryup'   # for cast
-cd /opt/m7cap
-sudo install -D -m 600 -o m7cap ops/monitor.env.example /etc/m7cap/monitor.env   # then fill it in
-sudo cp ops/m7cap-monitor.service ops/m7cap-monitor.timer /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now m7cap-monitor.timer
-sudo systemctl start m7cap-monitor.service && journalctl -u m7cap-monitor -n 50
+sudo useradd --system --create-home m7
+sudo -u m7 sh -c 'curl -L https://foundry.paradigm.xyz | bash && ~/.foundry/bin/foundryup'   # for cast
+cd /opt/m7
+sudo install -D -m 600 -o m7 ops/monitor.env.example /etc/m7/monitor.env   # then fill it in
+sudo cp ops/m7-monitor.service ops/m7-monitor.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now m7-monitor.timer
+sudo systemctl start m7-monitor.service && journalctl -u m7-monitor -n 50
 ```
 
 For the heartbeat, create a check (for example on healthchecks.io) that expects a ping every 15 minutes with 30 minutes' grace, and put its URL in `HEARTBEAT_URL`. Without systemd, use cron:
 
 ```sh
-*/15 * * * * cd /opt/m7cap && set -a && . /etc/m7cap/monitor.env && python3 scripts/monitor.py >> /var/log/m7cap-monitor.log 2>&1
+*/15 * * * * cd /opt/m7 && set -a && . /etc/m7/monitor.env && python3 scripts/monitor.py >> /var/log/m7-monitor.log 2>&1
 ```
 
 **Alert levels:**
 
 | Level | Examples | Response |
 |---|---|---|
-| critical | ratios or digest differ from the reviewed snapshot; a proposal while no reviewed snapshot is loaded; unexpected UMA parameters; a disputed or unsettleable assertion; 21 days or fewer left without an execution; failed preflight reads; backing per share fell; minting blocked | Act now: see the playbook |
-| action | no proposal yet; settlement available; an accepted proposal awaiting execution; a rejected proposal; deferred claims outstanding | Run the next maintenance step |
-| info | challenge window open on a matching proposal; replacement allowed | None |
+| critical | 21 days or fewer left without a reset; backing per share fell; minting blocked; failed preflight reads | Act now: see the playbook |
+| action | the reset still undone a week into the quarter; deferred claims outstanding | Run the reset, or look into the frozen asset |
+| info | the reset is due early in the quarter | None |
 
 ## Incident playbook
 
-**False or unreviewable proposal.** Compare the assertion with the reviewed snapshot and its sources. If it is false, dispute before `challenge_expires_utc` in the watcher output. The dispute wallet posts a bond equal to the assertion's (`bond_raw`), and must not be blocked by USDC:
+**Reset keeps reverting.** The revert names the gate:
+- `OutsideExecutionWindow`: wait for a weekday 15:00–20:00 UTC.
+- `NoFreshMarketSignal` or `UnavailablePrice`: the market is closed or a feed is stale; retry on the next trading day.
+- `CorporateAction`: an issuer paused a reference price; wait for it to resume.
+- `Too little received`: a pool sits more than 1% from its oracle price; retry later, and check that pool's depth with `verify_base.py`.
+- `NotCompliant` or `ExcessTurnover`: an unusual move; retry later in the quarter.
 
-```sh
-OOV3=0x2aBf1Bd76655de80eDB3086114315Eec75AF500c
-cast send "$USDC" 'approve(address,uint256)' "$OOV3" <bond_raw> --ledger --rpc-url "$BASE_RPC_URL"
-cast send "$OOV3" 'disputeAssertion(bytes32,address)' <assertion id> <dispute wallet> --ledger --rpc-url "$BASE_RPC_URL"
-```
+None of these changes anything, and a missed quarter only means the basket keeps its quantities.
 
-A disputed proposal never blocks a replacement, so propose the correct snapshot straight away. UMA's DVM resolves the dispute over the following days; the first proposal of the quarter to settle true is the one executed.
+**Backing per share fell.** Minting, redeeming and claims never lower it, so a fall outside a reset means an issuer seized or burned vault holdings. Check the stock's `Transfer` events from the vault and the issuer's announcements. Claims are paid before holders, so holders absorb the loss.
 
-**Our proposal disputed or unsettleable.** Propose again at once; the replacement is allowed. Settle whichever resolves true first.
-
-**Quarter deadline.** Leave at least four days: 72 hours of challenge and a weekday window. An accepted but unexecuted proposal expires at the quarter boundary, and the basket is simply kept.
-
-**Backing per share fell.** Minting, redeeming and claims never lower it, so a fall outside a rebalance means an issuer seized or burned vault holdings. Check the stock's `Transfer` events from the vault and the issuer's announcements. Claims are paid before holders, so holders absorb the loss.
-
-**Minting blocked.** An issuer seizure pushed a stock below the vault's precision floor. Redemptions still work, and the next quarterly rebalance rebuilds the stock by one step.
+**Minting blocked.** An issuer seizure pushed a stock below the vault's precision floor. Redemptions still work, and the next reset rebuilds the stock.
 
 **Preflight failure.** The message names the check:
 - a paused stock or issuer feed;
 - a policy that now rejects the vault or gateway;
-- changed feed decimals;
-- a de-listed UMA identifier or collateral.
+- changed feed decimals.
 
-The contracts fail closed. Holders' in-kind exit through `redeemBasketWithClaims` still delivers every asset that can move, and defers the rest as claims. A replaced stock contract, retired feed or de-listed identifier needs a new deployment and a voluntary migration.
-
+The contracts fail closed. Holders' in-kind exit through `redeemBasketWithClaims` still delivers every asset that can move, and defers the rest as claims. A replaced stock contract or retired feed needs a new deployment and a voluntary migration.

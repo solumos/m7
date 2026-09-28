@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Size the bootstrap basket from a reviewed index snapshot. Read-only; writes the seed file Bootstrap.s.sol reads.
+"""Size the bootstrap basket: equal USD value of each stock at current oracle prices. Read-only; writes the seed
+file Bootstrap.s.sol reads.
 
-The seven raw stock amounts are in the snapshot's exact quantity ratios, so the first rebalance toward those
-ratios has nothing to do. Current oracle prices only choose the scale: the basket is worth about the USD target.
-No keys, signatures, or transactions.
+An equal-value seed matches the controller's target, so the first quarterly reset has little or nothing to do. No
+keys, signatures, or transactions.
 """
 import argparse
 from datetime import datetime, timezone
@@ -13,8 +13,7 @@ import os
 from pathlib import Path
 import sys
 
-from index_snapshot import SYMBOLS
-from verify_base import RPC, address
+from verify_base import RPC, SYMBOLS, address
 
 ROOT = Path(__file__).resolve().parents[1]
 WAD = 10**18
@@ -23,6 +22,7 @@ LOCKED_SHARES = 10 * WAD
 MIN_LOCKED_STOCK_UNITS = 10_000
 # Smallest raw amount whose locked-share attribution, floor(raw * LOCKED / INITIAL), meets the vault's floor.
 MIN_RAW = MIN_LOCKED_STOCK_UNITS * INITIAL_SHARES // LOCKED_SHARES
+STOCK_UNIT = 10**8
 
 
 def checked_address(value, name):
@@ -33,50 +33,34 @@ def checked_address(value, name):
     return value
 
 
-def snapshot_ratios(snapshot):
-    if snapshot.get('symbols') != list(SYMBOLS):
-        raise ValueError('Snapshot symbols are not in canonical order')
-    ratios = [int(r) for r in snapshot['quantity_ratios']]
-    if len(ratios) != 7 or sum(ratios) != WAD or min(ratios) <= 0:
-        raise ValueError('Snapshot ratios must be seven positive integers summing to 1e18')
-    return ratios
-
-
-def size(ratios, prices, stock_units, usd):
-    """Raw amounts floor(ratio * Q * unit / 1e18), where Q whole tokens in total are worth `usd` at `prices`."""
+def size(prices, usd):
+    """Raw amounts worth usd / 7 each at `prices` (USDC per whole token), rounded down."""
     usd = Fraction(usd)
-    if usd <= 0 or min(prices) <= 0:
-        raise ValueError('The USD target and every price must be positive')
-    per_token = sum(Fraction(r, WAD) * p for r, p in zip(ratios, prices))
-    total_tokens = usd / per_token
-    raw = [int(Fraction(r, WAD) * total_tokens * unit) for r, unit in zip(ratios, stock_units)]
+    if usd <= 0 or len(prices) != 7 or min(prices) <= 0:
+        raise ValueError('The USD target and seven prices must be positive')
+    raw = [int(usd / 7 / p * STOCK_UNIT) for p in prices]
     short = [SYMBOLS[i] for i, amount in enumerate(raw) if amount < MIN_RAW]
     if short:
-        # Every stock needs MIN_RAW units; the smallest ratio sets the minimum basket value.
-        needed = max(usd * MIN_RAW / amount for amount in raw if amount) if all(raw) else None
-        raise ValueError('Below the vault precision floor for ' + ', '.join(short)
-                         + ('; use at least $%.2f' % float(needed) if needed else ''))
-    value = sum(Fraction(amount, unit) * p for amount, unit, p in zip(raw, stock_units, prices))
+        # Every stock needs MIN_RAW units; the priciest stock sets the minimum basket value.
+        needed = max(Fraction(MIN_RAW, STOCK_UNIT) * p for p in prices) * 7
+        raise ValueError('Below the vault precision floor for %s; use at least $%.2f' % (', '.join(short), needed))
+    value = sum(Fraction(amount, STOCK_UNIT) * p for amount, p in zip(raw, prices))
     return raw, value
 
 
-def build_seed(snapshot, prices, usd, vault, receiver, block):
-    ratios = snapshot_ratios(snapshot)
-    raw, value = size(ratios, prices, [10**8] * 7, usd)
+def build_seed(prices, usd, vault, receiver, block):
+    raw, value = size(prices, usd)
     return {
         'chain_id': 8453,
         'vault': checked_address(vault, 'vault'),
         'receiver': checked_address(receiver, 'receiver'),
         'raw_amounts': raw + [0],
-        'note': 'Bootstrap basket in the snapshot quantity ratios; stocks have 8 decimals, USDC is last and zero.',
+        'note': 'Bootstrap basket of equal value per stock; stocks have 8 decimals, USDC is last and zero.',
         'provenance': {
-            'quarter_id': snapshot['quarter_id'],
-            'observation_sha256': snapshot['observation_sha256'],
-            'quantity_ratios': [str(r) for r in ratios],
             'symbols': list(SYMBOLS),
             'usd_target': str(usd),
             'usd_value_at_prices': '%.6f' % float(value),
-            'prices_usd': ['%.8f' % float(p) for p in prices],
+            'prices_usdc': ['%.8f' % float(p) for p in prices],
             'block': block['number'],
             'block_timestamp': block['timestamp'],
         },
@@ -110,7 +94,6 @@ def check_vault(rpc, manifest, vault):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('snapshot', type=Path, nargs='?', default=ROOT / 'config/snapshot.json')
     parser.add_argument('--usd', default='1000', help='Approximate basket value in USDC (default 1000)')
     parser.add_argument('--vault', default=os.environ.get('VAULT'))
     parser.add_argument('--receiver', required=True, help='Receives the 990 unlocked seed shares')
@@ -128,8 +111,7 @@ def main():
         block = {'number': int(rpc.block['number'], 16),
                  'timestamp': datetime.fromtimestamp(int(rpc.block['timestamp'], 16), timezone.utc).isoformat()}
         max_age = args.max_feed_age or manifest['risk_checks']['max_stock_feed_age_seconds']
-        seed = build_seed(json.loads(args.snapshot.read_text()), read_prices(rpc, manifest, max_age), args.usd,
-                          vault, args.receiver, block)
+        seed = build_seed(read_prices(rpc, manifest, max_age), args.usd, vault, args.receiver, block)
     except Exception as exc:
         print(json.dumps({'error': str(exc)}, indent=2))
         return 1

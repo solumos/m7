@@ -3,28 +3,23 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
-import {M7CapLens} from "../src/M7CapLens.sol";
+import {M7Vault} from "../src/M7Vault.sol";
+import {M7Lens} from "../src/M7Lens.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3} from "../src/Valuation.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
-import {
-    ControllerToken,
-    ControllerFeed,
-    ControllerRegistry,
-    ControllerOracle
-} from "./mocks/ControllerMocks.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
+import {ControllerToken, ControllerFeed, ControllerRegistry} from "./mocks/ControllerMocks.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {PricedVenue} from "./mocks/RouterMocks.sol";
 
 /// @dev Price per share from the latest oracle prices, readable at any time, including outside the rebalance window.
-contract M7CapLensTest is Test {
+contract M7LensTest is Test {
     uint256[7] PRICES = [uint256(340), 250, 343, 749, 518, 225, 372];
 
-    M7CapVault vault;
+    M7Vault vault;
     IndexController controller;
     Valuation valuation;
-    M7CapLens lens;
+    M7Lens lens;
     IERC20[8] assets;
     ControllerFeed[8] feeds;
     ControllerFeed sequencer;
@@ -52,21 +47,12 @@ contract M7CapLensTest is Test {
             seed[i] = (i + 1) * 1e8; // 1, 2, ... 7 whole tokens
         }
         // Every contract created before the vault shifts its CREATE address, so create the mocks first.
-        ControllerOracle oracle = new ControllerOracle();
         PolicyRegistryMock policies = new PolicyRegistryMock();
         address predictedVault =
             vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
-        controller = new IndexController(
-            IM7CapVault(predictedVault),
-            oracle,
-            assets[7],
-            1000e6,
-            keccak256("methodology"),
-            "ipfs://m",
-            valuation
-        );
-        vault = new M7CapVault(assets, spacings, address(controller), venue, venue, policies, address(this));
-        lens = new M7CapLens(controller);
+        controller = new IndexController(IM7Vault(predictedVault), valuation);
+        vault = new M7Vault(assets, spacings, address(controller), venue, venue, policies, address(this));
+        lens = new M7Lens(controller);
         for (uint256 i; i < 8; ++i) {
             ControllerToken(addresses[i]).mint(address(this), 1e20);
             assets[i].approve(address(vault), type(uint256).max);
@@ -89,7 +75,7 @@ contract M7CapLensTest is Test {
 
     function testPricePerShareIsBackingValueOverSupply() public {
         vault.bootstrap(seed, address(this));
-        M7CapLens.Value memory v = lens.value();
+        M7Lens.Value memory v = lens.value();
         assertEq(v.supply, 1_000e18);
         assertEq(v.nav, _seedValue());
         assertEq(v.perShare, _seedValue() / 1_000);
@@ -126,7 +112,7 @@ contract M7CapLensTest is Test {
         vault.bootstrap(seed, address(this));
         registry.setPaused(address(assets[2]), true);
         sequencer.set(1, block.timestamp);
-        M7CapLens.Value memory v = lens.value();
+        M7Lens.Value memory v = lens.value();
         assertTrue(v.issuerPaused);
         assertTrue(v.sequencerDown);
         assertEq(v.perShare, _seedValue() / 1_000); // flags inform; they do not change the arithmetic
@@ -135,7 +121,7 @@ contract M7CapLensTest is Test {
     function testInvalidPriceReverts() public {
         vault.bootstrap(seed, address(this));
         feeds[5].set(0, block.timestamp);
-        vm.expectRevert(abi.encodeWithSelector(M7CapLens.InvalidPrice.selector, 5));
+        vm.expectRevert(abi.encodeWithSelector(M7Lens.InvalidPrice.selector, 5));
         lens.value();
     }
 
@@ -147,16 +133,8 @@ contract M7CapLensTest is Test {
             aggregators[i] = feeds[i];
         }
         Valuation wrong = new Valuation(other, aggregators, sequencer, registry, 25 hours);
-        IndexController mismatched = new IndexController(
-            IM7CapVault(address(vault)),
-            new ControllerOracle(),
-            assets[7],
-            1000e6,
-            keccak256("methodology"),
-            "ipfs://m",
-            wrong
-        );
-        vm.expectRevert(M7CapLens.InvalidConfiguration.selector);
-        new M7CapLens(mismatched);
+        IndexController mismatched = new IndexController(IM7Vault(address(vault)), wrong);
+        vm.expectRevert(M7Lens.InvalidConfiguration.selector);
+        new M7Lens(mismatched);
     }
 }

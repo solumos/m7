@@ -1,5 +1,7 @@
 # M7CAP security review 2 — 2026-09-26
 
+> **Status after the redesign (2026-09-27).** M7CAP has since been redesigned as **M7, "M7 Equal Weight"**, and its contracts renamed (`M7CapVault` → `M7Vault`, `M7CapLens` → `M7Lens`). UMA governance is gone: an autonomous quarterly reset that anyone may trigger returns the basket to equal value using only onchain prices, and pays the caller at most 0.5 bp of NAV, capped at $25. The gateway has no owner and no fee, and no contract has an owner. This review describes the earlier design and was not repeated on the new code. Findings about proposals, disputes and assertions (N-02, N-03, N-04, N-08 and the L-01 re-rating) no longer apply. The planner findings still apply to the reset, which reuses that planner, and so do the vault, gateway and policy findings. See [METHODOLOGY.md](METHODOLOGY.md) for the current rules.
+
 ## Scope and conclusion
 
 Reviewed commit `2c1b64179af278d63c00687bda3f0ce6bda5e8a3`, which is the M-01 fix on top of `ac11b09`. Scope: every contract and interface in `src/`, the deployment and maintenance scripts, and the off-chain tools where they feed on-chain decisions. This is a second internal, AI-assisted review, not an external firm's attestation. It builds on the [first review](AUDIT.md) and does not repeat its findings, except to re-rate them.
@@ -42,7 +44,7 @@ Residual risks after remediation:
 
 - **Execution:** an executor can still extract up to 1% of traded value through the pinned pools, a few basis points of NAV per quarter.
 - **Oracles:** a stale-but-accepted price widens that bound. A holiday heartbeat can open a window while the market is closed.
-- **Governance:** a false unchallenged assertion can still move composition one step per quarter, and the bond is fixed.
+- **Governance:** a false unchallenged assertion can still move composition one step per quarter, and the bond is fixed. *(Superseded: the equal-weight reset has no assertions. Its targets are computed onchain from prices, and one reset moves each stock's quantity share by at most its current size, or 0.25 points if that is more.)*
 - **Claims:** claims on frozen or seized assets may never pay out, and they are senior to holders under seizure.
 - **Eligibility:** policy mirroring means a stock-wide freeze or an allowlist switch also freezes M7CAP transfers, including M7CAP held in DeFi.
 - **Fee owner:** removed. The gateway briefly had an owner who could set a fee of at most 10 bp; the fee and the owner were taken out before deployment, so no contract has an owner.

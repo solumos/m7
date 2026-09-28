@@ -3,35 +3,34 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from monitor import REPEAT_CRITICAL_SECONDS, WAD, decode_value, plan_notifications, vault_state
+from monitor import REPEAT_CRITICAL_SECONDS, WAD, decode_value, plan_notifications, reset_status, vault_state
 
-OPEN = {'level': 'info', 'message': 'Challenge window is open; independently verify the assertion before expiry.'}
-SETTLE = {'level': 'action', 'message': 'Undisputed challenge window closed; settlement is available.'}
-FALSE = {'level': 'critical', 'message': 'ASSERTED RATIOS DIFFER FROM EXPECTED SNAPSHOT; independently review '
-                                         'before challenge expiry.'}
+DUE = {'level': 'info', 'message': "This quarter's equal-weight reset is due."}
+LATE = {'level': 'action', 'message': "This quarter's equal-weight reset has not run; anyone can trigger it."}
+BLOCKED = {'level': 'critical', 'message': 'New minting is blocked: InsufficientLockedBacking(3)'}
 
 
 class MonitorTest(unittest.TestCase):
     def test_new_alerts_at_or_above_the_level_are_sent_once(self):
-        messages, state = plan_notifications([OPEN, SETTLE], {}, 1000)
-        self.assertEqual(messages, ['[M7CAP ACTION] ' + SETTLE['message']])
-        messages, state = plan_notifications([OPEN, SETTLE], state, 1900)
+        messages, state = plan_notifications([DUE, LATE], {}, 1000)
+        self.assertEqual(messages, ['[M7 ACTION] ' + LATE['message']])
+        messages, state = plan_notifications([DUE, LATE], state, 1900)
         self.assertEqual(messages, [])
-        messages, _ = plan_notifications([OPEN], {}, 1000, notify_level='info')
-        self.assertEqual(messages, ['[M7CAP INFO] ' + OPEN['message']])
+        messages, _ = plan_notifications([DUE], {}, 1000, notify_level='info')
+        self.assertEqual(messages, ['[M7 INFO] ' + DUE['message']])
 
     def test_open_criticals_repeat_every_six_hours(self):
-        messages, state = plan_notifications([FALSE], {}, 1000)
+        messages, state = plan_notifications([BLOCKED], {}, 1000)
         self.assertEqual(len(messages), 1)
-        messages, state = plan_notifications([FALSE], state, 1000 + REPEAT_CRITICAL_SECONDS - 1)
+        messages, state = plan_notifications([BLOCKED], state, 1000 + REPEAT_CRITICAL_SECONDS - 1)
         self.assertEqual(messages, [])
-        messages, state = plan_notifications([FALSE], state, 1000 + REPEAT_CRITICAL_SECONDS)
-        self.assertEqual(messages, ['[M7CAP CRITICAL] ' + FALSE['message']])
+        messages, state = plan_notifications([BLOCKED], state, 1000 + REPEAT_CRITICAL_SECONDS)
+        self.assertEqual(messages, ['[M7 CRITICAL] ' + BLOCKED['message']])
 
     def test_cleared_alerts_are_announced_only_if_they_were_sent(self):
-        _, state = plan_notifications([OPEN, FALSE], {}, 1000)
+        _, state = plan_notifications([DUE, BLOCKED], {}, 1000)
         messages, state = plan_notifications([], state, 2000)
-        self.assertEqual(messages, ['[M7CAP RESOLVED] ' + FALSE['message']])
+        self.assertEqual(messages, ['[M7 RESOLVED] ' + BLOCKED['message']])
         self.assertEqual(state['open'], {})
 
     def test_other_state_survives(self):
@@ -53,7 +52,8 @@ class FakeVaultRPC:
         return {'totalSupply()': [self.supply], 'lastExecutedQuarter()': [self.last_executed],
                 'backing(uint256)': [self.backing[args[0]] if args else 0],
                 'reserved(uint256)': [self.reserved[args[0]] if args else 0],
-                'value()': [WAD + WAD // 2, 1_500 * WAD, 1_000 * WAD] + [0] * 8 + [1790870400, 0, 0]}[signature]
+                'value()': [WAD + WAD // 2, 1_500 * WAD, 1_000 * WAD] + [200 * WAD] * 6 + [300 * WAD, 0]
+                + [1790870400, 0, 0]}[signature]
 
 
 BACKING = [10**8 * (i + 1) for i in range(7)] + [0]
@@ -65,6 +65,9 @@ class VaultStateTest(unittest.TestCase):
         self.assertEqual(report['price_per_share_usd'], '1.500000')
         self.assertEqual(report['nav_usd'], '1500.00')
         self.assertEqual(report['oldest_price_at'], 1790870400)
+        self.assertEqual(report['weights']['AAPLc'], '0.1333')
+        self.assertEqual(report['weights']['TSLAc'], '0.2000')
+        self.assertEqual(report['largest_weight_gap'], '0.0571')
         with self.assertRaises(ValueError):
             decode_value([0] * 13)
 
@@ -91,6 +94,39 @@ class VaultStateTest(unittest.TestCase):
         self.assertIn('New minting is blocked', levels['critical'])
         self.assertIn('AMZNc, USDC', levels['action'])
 
+
+
+class FakeControllerRPC:
+    def __init__(self, done):
+        self.done = done
+
+    def call(self, target, signature, *args):
+        return {'currentQuarter()': [2026 * 4 + 3], 'executedQuarter(uint32)': [int(self.done)],
+                'lastExecutedQuarter()': [2026 * 4 + 2]}[signature]
+
+
+OCT_1 = 1790812800  # quarter 8107 begins
+JAN_1 = 1798761600  # and ends
+
+
+class ResetStatusTest(unittest.TestCase):
+    def test_due_then_late_then_critical(self):
+        alerts, report = reset_status(FakeControllerRPC(False), 'c', OCT_1 + 3 * 86400)
+        self.assertEqual([a['level'] for a in alerts], ['info'])
+        self.assertEqual(report['quarter_ends_at'], '2027-01-01T00:00:00+00:00')
+        alerts, _ = reset_status(FakeControllerRPC(False), 'c', OCT_1 + 8 * 86400)
+        self.assertEqual([a['level'] for a in alerts], ['action'])
+        alerts, _ = reset_status(FakeControllerRPC(False), 'c', JAN_1 - 20 * 86400)
+        self.assertEqual([a['level'] for a in alerts], ['critical'])
+        self.assertIn('2027-01-01 00:00 UTC', alerts[0]['message'])
+        # The same alert on later days, so it repeats rather than resolving and reopening.
+        later, _ = reset_status(FakeControllerRPC(False), 'c', JAN_1 - 3 * 86400)
+        self.assertEqual(later, alerts)
+
+    def test_done_quarter_is_quiet(self):
+        alerts, report = reset_status(FakeControllerRPC(True), 'c', JAN_1 - 86400)
+        self.assertEqual(alerts, [])
+        self.assertTrue(report['reset_done'])
 
 if __name__ == '__main__':
     unittest.main()

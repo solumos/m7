@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "./ISlipstreamRouter.sol";
 import {Swap} from "../Types.sol";
 
-interface IM7CapVault is IERC20 {
+interface IM7Vault is IERC20 {
     function assets(uint256 index) external view returns (IERC20);
     function tickSpacing(uint256 index) external view returns (int24);
     function router() external view returns (ISlipstreamRouter);
@@ -34,4 +34,5 @@ interface IM7CapVault is IERC20 {
     ) external returns (uint256[8] memory delivered, uint256[8] memory deferred);
     function withdrawClaim(uint256 index, uint256 amount, address to) external;
     function rebalance(Swap[] calldata swaps, uint256 deadline) external;
+    function payReward(address to, uint256 amount) external;
 }

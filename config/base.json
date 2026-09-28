@@ -11,15 +11,11 @@
     "chainlink_directory_provenance": "https://github.com/smartcontractkit/documentation/blob/main/src/features/data/chains.ts",
     "usdc": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
     "sequencer": "https://docs.chain.link/data-feeds/l2-sequencer-feeds",
-    "uma": "https://raw.githubusercontent.com/UMAprotocol/protocol/master/packages/core/networks/8453.json",
     "slipstream": "https://raw.githubusercontent.com/aerodrome-finance/slipstream/main/README.md",
     "quoter_abi": "https://raw.githubusercontent.com/aerodrome-finance/slipstream/main/contracts/periphery/interfaces/IQuoterV2.sol",
     "registry_abi": "https://base.blockscout.com/api/v2/smart-contracts/0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD",
     "b20_abi": "https://raw.githubusercontent.com/base/base-std/main/src/interfaces/IB20.sol",
-    "policy_registry": "https://api.coinbase.com/v1/tokenized-stocks/chains",
-    "uma_approved_identifiers": "https://docs.uma.xyz/resources/approved-price-identifiers",
-    "uma_assert_truth2": "https://raw.githubusercontent.com/UMAprotocol/UMIPs/master/UMIPs/umip-191.md",
-    "uma_oo_v3_source": "https://raw.githubusercontent.com/UMAprotocol/protocol/master/packages/core/contracts/optimistic-oracle-v3/implementation/OptimisticOracleV3.sol"
+    "policy_registry": "https://api.coinbase.com/v1/tokenized-stocks/chains"
   },
   "usdc": {
     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -29,7 +25,6 @@
   },
   "registry": "0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD",
   "sequencer_feed": "0xBCF85224fc0756B9Fa45aA7892530B47e10b6433",
-  "uma_oo_v3": "0x2aBf1Bd76655de80eDB3086114315Eec75AF500c",
   "venue": {
     "name": "Aerodrome Slipstream gauges V3",
     "router": "0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",
@@ -112,17 +107,16 @@
     }
   ],
   "launch_blockers": [
-    "Reviewed quarter-end company share observations and initial weights are not supplied.",
     "Re-run the native tests and script/rehearse.sh on a post-Cobalt block (after 2026-09-30 18:00 UTC), and verify the deployment with scripts/verify_deployment.py before seeding.",
-    "Issuer eligibility and legal review remain the owner's responsibility. The owner decided on 2026-09-26 to launch without an independent smart-contract review.",
-    "Independent UMA monitoring and dispute capital must be funded separately from seed backing."
+    "Issuer eligibility and legal review remain the owner's responsibility. The owner decided on 2026-09-26 to launch without an independent smart-contract review; the equal-weight reset added on 2026-09-27 has had internal testing only.",
+    "Run scripts/monitor.py on an always-on server with tested alerting before seeding. While the reset reward (0.5 bp of NAV) is too small to attract keepers, the owner must trigger each quarterly reset."
   ],
   "policy_registry": "0x8453000000000000000000000000000000000002",
   "verification": {
     "chain_id": 8453,
-    "block": 51830549,
-    "block_hash": "0xf823c24396bac6cfacb24c8d46a6e3c3555e121bbdfa9b88af2beaa2fcb1f23b",
-    "block_timestamp": "2026-09-26T19:20:45+00:00",
+    "block": 51883453,
+    "block_hash": "0x2dc51fa84a7ed91413dccd75188657396eafbbe899305ef50875fdea9b24fe88",
+    "block_timestamp": "2026-09-28T00:44:13+00:00",
     "rpc": "https://base-rpc.publicnode.com",
     "errors": [],
     "stocks": [
@@ -135,13 +129,13 @@
         "pool": "0xa3b1e3f9747065e2073722ff4c9027d3ea4994f0",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "34151300000",
-          "updated_at": 1790365851,
-          "age_seconds": 84594,
-          "fresh": false
+          "answer": "34024000000",
+          "updated_at": 1790553655,
+          "age_seconds": 2598,
+          "fresh": true
         },
         "multiplier_wad": "1000000000000000000",
-        "active_liquidity": "668431939992628",
+        "active_liquidity": "330374237693817",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -157,13 +151,13 @@
         "pool": "0xd03bc8c7f2faedce2aac81bf0444aea08ea06e9b",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "24965000000",
-          "updated_at": 1790352027,
-          "age_seconds": 98418,
-          "fresh": false
+          "answer": "24950000000",
+          "updated_at": 1790553635,
+          "age_seconds": 2618,
+          "fresh": true
         },
         "multiplier_wad": "1000000000000000000",
-        "active_liquidity": "504975156760872",
+        "active_liquidity": "141937200665102",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -179,13 +173,13 @@
         "pool": "0xb1987cad1682841b4b641d50e520777ec5ab5542",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "34339445164",
-          "updated_at": 1790364883,
-          "age_seconds": 85562,
-          "fresh": false
+          "answer": "34335443655",
+          "updated_at": 1790553647,
+          "age_seconds": 2606,
+          "fresh": true
         },
         "multiplier_wad": "1000377118676784179",
-        "active_liquidity": "523435863868115",
+        "active_liquidity": "140613705541118",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -201,13 +195,13 @@
         "pool": "0xeaf57753bc382e0324a1d43f72e7027705a2273e",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "74900000000",
-          "updated_at": 1790379343,
-          "age_seconds": 71102,
-          "fresh": false
+          "answer": "74289500000",
+          "updated_at": 1790556035,
+          "age_seconds": 218,
+          "fresh": true
         },
         "multiplier_wad": "1000000000000000000",
-        "active_liquidity": "287157170227792",
+        "active_liquidity": "48233553826313",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -223,13 +217,13 @@
         "pool": "0x7103eb3c9590d1281f7dc03b2a9ee27c39df5d54",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "51794800000",
-          "updated_at": 1790354869,
-          "age_seconds": 95576,
-          "fresh": false
+          "answer": "51699000000",
+          "updated_at": 1790553625,
+          "age_seconds": 2628,
+          "fresh": true
         },
         "multiplier_wad": "1000000000000000000",
-        "active_liquidity": "252769163011467",
+        "active_liquidity": "12819736045829",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -245,13 +239,13 @@
         "pool": "0x853f5f1b92b16714fe6cda67caad0856b83c7ab9",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "22541045000",
-          "updated_at": 1790366123,
-          "age_seconds": 84322,
-          "fresh": false
+          "answer": "22512500000",
+          "updated_at": 1790553623,
+          "age_seconds": 2630,
+          "fresh": true
         },
         "multiplier_wad": "1000000000000000000",
-        "active_liquidity": "548893146779537",
+        "active_liquidity": "183951310791355",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -267,13 +261,13 @@
         "pool": "0x469337fdcc5e8f38e2e4b670b04f57865d13a7bb",
         "tick_spacing": 10,
         "feed_data": {
-          "answer": "37236640000",
-          "updated_at": 1790362333,
-          "age_seconds": 88112,
-          "fresh": false
+          "answer": "37274000000",
+          "updated_at": 1790553651,
+          "age_seconds": 2602,
+          "fresh": true
         },
         "multiplier_wad": "1000000000000000000",
-        "active_liquidity": "204886416293179",
+        "active_liquidity": "21481498998920",
         "policy_ids": {
           "TRANSFER_SENDER_POLICY": 5,
           "TRANSFER_RECEIVER_POLICY": 5,
@@ -287,218 +281,231 @@
         "legs": [
           {
             "symbol": "AAPLc",
-            "stock_amount_raw": "418306",
-            "buy_usdc_raw": "1423730",
-            "sell_usdc_raw": "1422302"
+            "stock_amount_raw": "419871",
+            "buy_usdc_raw": "1428248",
+            "sell_usdc_raw": "1426818"
           },
           {
             "symbol": "AMZNc",
-            "stock_amount_raw": "572229",
-            "buy_usdc_raw": "1430425",
-            "sell_usdc_raw": "1428991"
+            "stock_amount_raw": "572573",
+            "buy_usdc_raw": "1429219",
+            "sell_usdc_raw": "1427787"
           },
           {
             "symbol": "GOOGLc",
-            "stock_amount_raw": "416014",
-            "buy_usdc_raw": "1429956",
-            "sell_usdc_raw": "1428522"
+            "stock_amount_raw": "416063",
+            "buy_usdc_raw": "1429062",
+            "sell_usdc_raw": "1427629"
           },
           {
             "symbol": "METAc",
-            "stock_amount_raw": "190730",
-            "buy_usdc_raw": "1427552",
-            "sell_usdc_raw": "1426119"
+            "stock_amount_raw": "192297",
+            "buy_usdc_raw": "1430257",
+            "sell_usdc_raw": "1428819"
           },
           {
             "symbol": "MSFTc",
-            "stock_amount_raw": "275813",
-            "buy_usdc_raw": "1428971",
-            "sell_usdc_raw": "1427540"
+            "stock_amount_raw": "276324",
+            "buy_usdc_raw": "1423706",
+            "sell_usdc_raw": "1422277"
           },
           {
             "symbol": "NVDAc",
-            "stock_amount_raw": "633764",
-            "buy_usdc_raw": "1424647",
-            "sell_usdc_raw": "1423221"
+            "stock_amount_raw": "634568",
+            "buy_usdc_raw": "1429029",
+            "sell_usdc_raw": "1427598"
           },
           {
             "symbol": "TSLAc",
-            "stock_amount_raw": "383646",
-            "buy_usdc_raw": "1428631",
-            "sell_usdc_raw": "1427201"
+            "stock_amount_raw": "383262",
+            "buy_usdc_raw": "1425754",
+            "sell_usdc_raw": "1424326"
           }
         ],
-        "buy_usdc_raw": "9993912",
-        "sell_usdc_raw": "9983896",
-        "buy_premium_bps_vs_reference": -6.088,
-        "sell_discount_bps_vs_reference": 16.104
+        "buy_usdc_raw": "9995275",
+        "sell_usdc_raw": "9985254",
+        "buy_premium_bps_vs_reference": -4.725,
+        "sell_discount_bps_vs_reference": 14.746
       },
       {
         "reference_usd_notional": 100,
         "legs": [
           {
             "symbol": "AAPLc",
-            "stock_amount_raw": "4183066",
-            "buy_usdc_raw": "14237313",
-            "sell_usdc_raw": "14223076"
+            "stock_amount_raw": "4198716",
+            "buy_usdc_raw": "14282491",
+            "sell_usdc_raw": "14268207"
           },
           {
             "symbol": "AMZNc",
-            "stock_amount_raw": "5722296",
-            "buy_usdc_raw": "14304251",
-            "sell_usdc_raw": "14289945"
+            "stock_amount_raw": "5725737",
+            "buy_usdc_raw": "14292200",
+            "sell_usdc_raw": "14277908"
           },
           {
             "symbol": "GOOGLc",
-            "stock_amount_raw": "4160147",
-            "buy_usdc_raw": "14299578",
-            "sell_usdc_raw": "14285278"
+            "stock_amount_raw": "4160631",
+            "buy_usdc_raw": "14290616",
+            "sell_usdc_raw": "14276324"
           },
           {
             "symbol": "METAc",
-            "stock_amount_raw": "1907304",
-            "buy_usdc_raw": "14275543",
-            "sell_usdc_raw": "14261267"
+            "stock_amount_raw": "1922978",
+            "buy_usdc_raw": "14302616",
+            "sell_usdc_raw": "14288308"
           },
           {
             "symbol": "MSFTc",
-            "stock_amount_raw": "2758136",
-            "buy_usdc_raw": "14289727",
-            "sell_usdc_raw": "14275434"
+            "stock_amount_raw": "2763247",
+            "buy_usdc_raw": "14237100",
+            "sell_usdc_raw": "14222850"
           },
           {
             "symbol": "NVDAc",
-            "stock_amount_raw": "6337645",
-            "buy_usdc_raw": "14246474",
-            "sell_usdc_raw": "14232228"
+            "stock_amount_raw": "6345680",
+            "buy_usdc_raw": "14290285",
+            "sell_usdc_raw": "14275995"
           },
           {
             "symbol": "TSLAc",
-            "stock_amount_raw": "3836467",
-            "buy_usdc_raw": "14286328",
-            "sell_usdc_raw": "14272039"
+            "stock_amount_raw": "3832621",
+            "buy_usdc_raw": "14257548",
+            "sell_usdc_raw": "14243280"
           }
         ],
-        "buy_usdc_raw": "99939214",
-        "sell_usdc_raw": "99839267",
-        "buy_premium_bps_vs_reference": -6.0786,
-        "sell_discount_bps_vs_reference": 16.0733
+        "buy_usdc_raw": "99952856",
+        "sell_usdc_raw": "99852872",
+        "buy_premium_bps_vs_reference": -4.7144,
+        "sell_discount_bps_vs_reference": 14.7128
       },
       {
         "reference_usd_notional": 1000,
         "legs": [
           {
             "symbol": "AAPLc",
-            "stock_amount_raw": "41830660",
-            "buy_usdc_raw": "142373140",
-            "sell_usdc_raw": "142230766"
+            "stock_amount_raw": "41987168",
+            "buy_usdc_raw": "142824951",
+            "sell_usdc_raw": "142682092"
           },
           {
             "symbol": "AMZNc",
-            "stock_amount_raw": "57222969",
-            "buy_usdc_raw": "143042538",
-            "sell_usdc_raw": "142899477"
+            "stock_amount_raw": "57257371",
+            "buy_usdc_raw": "142922076",
+            "sell_usdc_raw": "142779005"
           },
           {
             "symbol": "GOOGLc",
-            "stock_amount_raw": "41601470",
-            "buy_usdc_raw": "142995796",
-            "sell_usdc_raw": "142852792"
+            "stock_amount_raw": "41606319",
+            "buy_usdc_raw": "142906255",
+            "sell_usdc_raw": "142763223"
           },
           {
             "symbol": "METAc",
-            "stock_amount_raw": "19073049",
-            "buy_usdc_raw": "142755519",
-            "sell_usdc_raw": "142612743"
+            "stock_amount_raw": "19229789",
+            "buy_usdc_raw": "143026352",
+            "sell_usdc_raw": "142883049"
           },
           {
             "symbol": "MSFTc",
-            "stock_amount_raw": "27581367",
-            "buy_usdc_raw": "142897334",
-            "sell_usdc_raw": "142754399"
+            "stock_amount_raw": "27632477",
+            "buy_usdc_raw": "142371658",
+            "sell_usdc_raw": "142227926"
           },
           {
             "symbol": "NVDAc",
-            "stock_amount_raw": "63376450",
-            "buy_usdc_raw": "142464748",
-            "sell_usdc_raw": "142322266"
+            "stock_amount_raw": "63456809",
+            "buy_usdc_raw": "142902926",
+            "sell_usdc_raw": "142759908"
           },
           {
             "symbol": "TSLAc",
-            "stock_amount_raw": "38364670",
-            "buy_usdc_raw": "142863313",
-            "sell_usdc_raw": "142720378"
+            "stock_amount_raw": "38326217",
+            "buy_usdc_raw": "142575936",
+            "sell_usdc_raw": "142432411"
           }
         ],
-        "buy_usdc_raw": "999392388",
-        "sell_usdc_raw": "998392821",
-        "buy_premium_bps_vs_reference": -6.0761,
-        "sell_discount_bps_vs_reference": 16.0718
+        "buy_usdc_raw": "999530154",
+        "sell_usdc_raw": "998527614",
+        "buy_premium_bps_vs_reference": -4.6985,
+        "sell_discount_bps_vs_reference": 14.7239
       }
     ],
-    "quote_basis": "equal dollar allocations for liquidity probes; NOT index weights",
-    "funded_transaction_test": "not part of this read-only snapshot; see native_fork_verification for subsequent local-fork execution",
+    "quote_basis": "equal dollar allocations: the index weights",
+    "funded_transaction_test": "not performed by this read-only tool; see manifest native_fork_verification",
     "launch_ready": false,
+    "applied_risk_checks": {
+      "max_stock_feed_age_seconds": 90000,
+      "fresh_signal_seconds": 3600,
+      "max_usdc_feed_age_seconds": 90000,
+      "sequencer_grace_seconds": 3600,
+      "execution_window_utc_seconds": [
+        54000,
+        72000
+      ]
+    },
     "usdc_feed": {
-      "answer": "99992320",
-      "updated_at": 1790426723,
-      "age_seconds": 23722,
+      "answer": "99989221",
+      "updated_at": 1790513143,
+      "age_seconds": 43110,
       "fresh": true
     },
     "sequencer_up_since": 1782491507,
-    "uma_minimum_bond_usdc_raw": "500000000",
     "router_factory_match": true,
+    "policy_zero_authorized": true,
     "read_checks_passed": true,
+    "rebalance_oracle_checks": {
+      "in_execution_window": false,
+      "stocks_within_max_age": true,
+      "market_open_signal": true,
+      "usdc_within_max_age": true
+    },
     "rebalance_oracles_currently_usable": false,
     "remaining_launch_blockers": [
-      "Reviewed quarter-end company share observations and initial weights are not supplied.",
-      "Native Base local-fork gateway round-trip passed; repeat against final production deployment addresses and reviewed cap-weighted bootstrap quantities before seeding.",
-      "Independent smart-contract review and issuer eligibility/legal review remain required.",
-      "Independent UMA monitoring and dispute capital must be funded separately from seed backing.",
+      "Re-run the native tests and script/rehearse.sh on a post-Cobalt block (after 2026-09-30 18:00 UTC), and verify the deployment with scripts/verify_deployment.py before seeding.",
+      "Issuer eligibility and legal review remain the owner's responsibility. The owner decided on 2026-09-26 to launch without an independent smart-contract review; the equal-weight reset added on 2026-09-27 has had internal testing only.",
+      "Run scripts/monitor.py on an always-on server with tested alerting before seeding. While the reset reward (0.5 bp of NAV) is too small to attract keepers, the owner must trigger each quarterly reset.",
       "Quotes are eth_call simulations at one block, not funded atomic gateway execution."
-    ],
-    "applied_risk_checks": {
-      "max_stock_feed_age_seconds": 3600,
-      "max_usdc_feed_age_seconds": 90000,
-      "sequencer_grace_seconds": 3600
-    }
+    ]
   },
   "reference_feed_heartbeat_seconds": 86400,
   "native_fork_verification": {
     "status": "passed_local_simulation_not_live_broadcast",
     "chain_id": 8453,
-    "date": "2026-09-27",
-    "block": 51869461,
+    "date": "2026-09-28",
+    "block": 51883749,
     "tool": "base/base-anvil nightly-98e7839c65f64aee9627b69a9b98b79afaeb1fae (Foundry 1.6.0-nightly) reproducing base/base 3eb481791135; binaries checked with gh attestation verify",
     "tool_source": "https://github.com/base/base-anvil",
     "precompile_rules_passed": [
       "Beryl",
       "Cobalt"
     ],
-    "figures_from": "Cobalt rules at the block above; Beryl rules passed at block 51869467",
+    "figures_from": "Cobalt rules, blocks 51883749 to 51883797; Beryl rules passed at blocks 51883812 to 51883871",
     "funding": "USDC created with local fork deal; native B20 state was not fabricated",
     "tests": [
       "test/BaseFork.t.sol:testBaseNativeB20BootstrapAndUSDCRoundTrip",
-      "test/BaseFork.t.sol:testBaseLiveUMAAssertionAndBondRefund",
-      "test/BaseFork.t.sol:testBaseNativeRebalanceAgainstLivePools",
-      "test/BaseFork.t.sol:testBaseNativeTransferGasAndResilientRedemption",
-      "test/BaseFork.t.sol:testBaseNativeLensPricesShares"
+      "test/BaseFork.t.sol:testBaseNativeLensPricesShares",
+      "test/BaseFork.t.sol:testBaseNativeResetToEqualWeightsThroughLivePools",
+      "test/BaseFork.t.sol:testBaseNativeTransferGasAndResilientRedemption"
     ],
     "round_trip": {
-      "bootstrap": "100 USDC exact-input purchase from each of the seven real stock pools; equal-dollar fixture, not index weights",
+      "block": 51883749,
+      "bootstrap": "100 USDC exact-input purchase from each of the seven real stock pools; an equal-dollar fixture",
       "gateway": "no owner and no fee",
       "mint_shares_raw": "100000000000000000000",
-      "mint_usdc_raw": "70000037",
-      "redeem_usdc_raw": "69929990"
+      "mint_usdc_raw": "70000076",
+      "redeem_usdc_raw": "69930045"
     },
-    "rebalance": {
-      "legs": 2,
-      "execute_gas": 563256,
-      "nav_before_usd_1e18": "1049525464400801754400",
-      "nav_after_usd_1e18": "1049544483800451754400",
-      "sold_value_usd_1e18": "4494945753500000000",
-      "bought_value_usd_1e18": "4498272078982970000",
-      "feeds": "fork-time answers reported fresh with vm.mockCall after time travel; prices unchanged"
+    "reset": {
+      "block": 51883777,
+      "seed": "AAPLc at twice the value of each other stock",
+      "legs": 7,
+      "gas": 1162567,
+      "nav_before_usd_1e18": "1199747060769772285500",
+      "nav_after_usd_1e18": "1199508945841372076500",
+      "sold_value_usd_1e18": "128635853528800000000",
+      "bought_value_usd_1e18": "128424993577651980000",
+      "reward_value_usd_1e18": "59986533354530000",
+      "feeds": "fork-time answers reported fresh with vm.mockCall after time travel to the next weekday window; prices unchanged"
     },
     "receipt_transfer_gas": {
       "new_recipient": 51549,
@@ -513,76 +520,33 @@
         "Beryl"
       ],
       "fork_source": "https://mainnet.base.org (throttled)",
-      "deployment_checks": 65,
-      "bootstrap_checks": 85,
-      "seed_usdc_spent_raw": "999837615",
-      "seed_oracle_value_usd": "999.999984",
-      "fixture": "illustrative ratios labelled REHEARSAL FIXTURE, NOT INDEX DATA"
+      "block": 51883654,
+      "deployment_checks": 63,
+      "bootstrap_checks": 84,
+      "seed": "equal-dollar, sized by scripts/seed_basket.py",
+      "seed_usdc_spent_raw": "999210954",
+      "seed_oracle_value_usdc": "999.999986",
+      "first_reset": "Maintain.s.sol:Rebalance refused with OutsideExecutionWindow; rebalanceDue() stayed true"
     },
     "not_validated": [
-      "Reviewed production market-cap weights and production deployment addresses.",
+      "Production deployment addresses.",
       "Live broadcast, real funds, or issuer redemption.",
-      "Disputed cross-chain UMA resolution.",
+      "The runbook reset script inside a live execution window: rehearse between 15:00 and 20:00 UTC on a weekday.",
       "Precompile behavior on a post-Cobalt mainnet block (re-run after 2026-09-30 18:00 UTC)."
     ],
-    "uma_lifecycle": {
-      "status": "passed_real_OOv3_on_local_fork",
-      "assertion_identifier": "ASSERT_TRUTH2",
-      "live_minimum_bond_usdc_raw": "500000000",
-      "supplied_bond_usdc_raw": "1000000000",
-      "refunded_bond_usdc_raw": "1000000000",
-      "liveness_seconds": 259200,
-      "early_settlement": "reverted",
-      "settlement": "permissionless accepted after local time advance",
-      "fixture": "explicitly synthetic claim/ratios; no production company-cap observations",
-      "oracle_mocked": false,
-      "whitelist_modified": false,
-      "live_transaction_broadcast": false
-    },
-    "pre_remediation_run": {
+    "earlier_design_round_trip": {
       "block": 51830602,
       "tool": "official base/base-anvil Base Foundry v1.1.0",
       "mint_usdc_raw": "70000034",
-      "redeem_usdc_raw": "69929989"
+      "redeem_usdc_raw": "69929989",
+      "design": "cap-weighted, before the audit remediation"
     },
     "price_per_share": {
-      "lens": "src/M7CapLens.sol",
-      "block": 51869944,
+      "lens": "src/M7Lens.sol",
+      "block": 51883762,
       "seed_usdc": "700",
-      "price_per_share_usd": "0.699684666665811566",
-      "stalest_price_age_seconds": 177208
-    }
-  },
-  "uma_assertion_identifier": "ASSERT_TRUTH2",
-  "uma_readiness_verification": {
-    "block": 51830957,
-    "block_hash": "0xc1cb43abdae549d92678786d0cb62246b75b4257acb47cb87748d5c65f1c4bd6",
-    "block_timestamp": "2026-09-26T19:34:21+00:00",
-    "rpc": "https://base-rpc.publicnode.com",
-    "uma": {
-      "finder": "0x7e6d9618ba8a87421609352d6e711958a97e2512",
-      "implementations": {
-        "IdentifierWhitelist": "0xad517d72b9cd31f578197d5e903d041b88c69795",
-        "CollateralWhitelist": "0x0f7fc5e6482f096380db6158f978167b57388dee",
-        "Store": "0xa799650614f84e0b7e7e99e12d5dfc241907cd85",
-        "Oracle": "0x7e01536f1b6fd2201c2fd8e1a6143c987573c00f",
-        "OptimisticOracleV3": "0x2abf1bd76655de80edb3086114315eec75af500c"
-      },
-      "configured_identifier": "ASSERT_TRUTH2",
-      "configured_identifier_bytes32": "0x4153534552545f54525554483200000000000000000000000000000000000000",
-      "configured_identifier_supported": true,
-      "usdc_currently_allowlisted": true,
-      "configured_identifier_cached": true,
-      "oracle_default_identifier_bytes32": "0x4153534552545f54525554480000000000000000000000000000000000000000",
-      "oracle_default_identifier_text": "ASSERT_TRUTH",
-      "oracle_default_identifier_supported": false,
-      "cached_currency_allowlisted": true,
-      "cached_final_fee_usdc_raw": "250000000",
-      "current_final_fee_usdc_raw": "250000000",
-      "minimum_bond_cached_usdc_raw": "500000000",
-      "minimum_bond_after_sync_usdc_raw": "500000000",
-      "sync_eth_call_succeeded": true,
-      "cache_persisted": false
+      "price_per_share_usd": "0.699824252095245838",
+      "stalest_price_age_seconds": 43728
     }
   }
 }

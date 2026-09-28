@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 import {Script, console2} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation} from "../src/Valuation.sol";
 import {ISlipstreamRouter} from "../src/interfaces/ISlipstreamRouter.sol";
@@ -17,7 +17,7 @@ contract AcquireSeed is Script {
     uint256 public constant MAX_PREMIUM_BPS = 100;
 
     function run() external {
-        M7CapVault vault = M7CapVault(payable(vm.envAddress("VAULT")));
+        M7Vault vault = M7Vault(payable(vm.envAddress("VAULT")));
         address deployer = vm.envAddress("DEPLOYER");
         require(vault.bootstrapper() == deployer && vault.totalSupply() == 0, "invalid bootstrap state");
         string memory seed = vm.readFile(vm.envOr("SEED_FILE", string("config/seed.json")));
@@ -43,7 +43,7 @@ contract AcquireSeed is Script {
     }
 
     /// @dev Each stock's shortfall and its USDC ceiling: the oracle value plus the premium, rounded up.
-    function _plan(M7CapVault vault, address deployer, uint256[] memory amounts)
+    function _plan(M7Vault vault, address deployer, uint256[] memory amounts)
         private
         view
         returns (uint256[7] memory need, uint256[7] memory maxIn, uint256 budget)
@@ -67,7 +67,7 @@ contract AcquireSeed is Script {
     }
 
     function _buy(
-        M7CapVault vault,
+        M7Vault vault,
         uint256 index,
         uint256 amountOut,
         uint256 maxIn,

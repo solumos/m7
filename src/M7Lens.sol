@@ -4,20 +4,20 @@ pragma solidity 0.8.30;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IndexController} from "./IndexController.sol";
 import {Valuation} from "./Valuation.sol";
-import {IM7CapVault} from "./interfaces/IM7CapVault.sol";
+import {IM7Vault} from "./interfaces/IM7Vault.sol";
 
-/// @notice Read-only value of M7CAP from the latest oracle prices, for dashboards and monitoring. It has no owner and
+/// @notice Read-only value of M7 from the latest oracle prices, for dashboards and monitoring. It has no owner and
 ///         no effect on the other contracts, so it can be deployed or replaced at any time.
 /// @dev Unlike Valuation.snapshot, which gates rebalances, it applies no trading-window or staleness rule; it reports
 ///      the update time of its stalest price instead. Stock feeds stand still outside market hours, so do not use it
 ///      as a lending or liquidation price without your own staleness check.
-contract M7CapLens {
+contract M7Lens {
     struct Value {
-        /// USD value of one whole M7CAP, 18 decimals.
+        /// USD value of one whole M7, 18 decimals.
         uint256 perShare;
         /// USD value of the vault's backing, 18 decimals. Amounts owed to earlier redeemers are excluded.
         uint256 nav;
-        /// M7CAP supply, 18 decimals, including the permanently locked seed shares.
+        /// M7 supply, 18 decimals, including the permanently locked seed shares.
         uint256 supply;
         /// USD value of each asset's backing in canonical order, USDC last.
         uint256[8] components;
@@ -29,7 +29,7 @@ contract M7CapLens {
         bool sequencerDown;
     }
 
-    IM7CapVault public immutable vault;
+    IM7Vault public immutable vault;
     Valuation public immutable valuation;
 
     error InvalidConfiguration();
@@ -43,13 +43,13 @@ contract M7CapLens {
         }
     }
 
-    /// @notice USD value of one whole M7CAP (18 decimals) and the update time of the stalest price behind it.
+    /// @notice USD value of one whole M7 (18 decimals) and the update time of the stalest price behind it.
     function pricePerShare() external view returns (uint256 perShare, uint256 oldestPriceAt) {
         Value memory v = value();
         return (v.perShare, v.oldestPriceAt);
     }
 
-    /// @notice USD value of everything backing M7CAP (18 decimals) and the update time of the stalest price behind it.
+    /// @notice USD value of everything backing M7 (18 decimals) and the update time of the stalest price behind it.
     /// @dev Excludes assets owed to earlier redeemers as deferred claims, which belong to them, not to holders.
     function totalValue() external view returns (uint256 nav, uint256 oldestPriceAt) {
         Value memory v = value();

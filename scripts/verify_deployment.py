@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only check of a deployed M7CAP system: once before any funds go in, and again after the bootstrap.
+"""Read-only check of a deployed M7 system: once before any funds go in, and again after the bootstrap.
 
 Compares every constructor-set value of the four contracts with config/base.json, the environment and the exact
 bytes of docs/METHODOLOGY.md, checks the contracts are bound to each other, and compares their runtime bytecode
@@ -13,11 +13,10 @@ from pathlib import Path
 import subprocess
 import sys
 
-from ipfs_cid import raw_cid
 from verify_base import RPC, address, keccak_text
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS = ('Valuation', 'IndexController', 'M7CapVault', 'USDCGateway', 'M7CapLens')
+CONTRACTS = ('Valuation', 'IndexController', 'M7Vault', 'USDCGateway', 'M7Lens')
 SEED_LOCK = '0x' + '00' * 19 + '01'
 WAD = 10**18
 
@@ -52,8 +51,8 @@ def compare_bytecode(onchain_hex, artifact):
 
 
 def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
-    """`addresses` maps each contract name to its lowercase address. `expected` holds deployer, bond_floor,
-    methodology (bytes) and optionally methodology_uri. `seed` switches to the post-bootstrap checks."""
+    """`addresses` maps each contract name to its lowercase address. `expected` holds the deployer. `seed` switches
+    to the post-bootstrap checks."""
     report = {'block': int(rpc.block['number'], 16), 'contracts': addresses, 'checks': [], 'failures': []}
 
     def check(name, actual, wanted):
@@ -70,9 +69,9 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
     def addr(target, signature, *args):
         return address(num(target, signature, *args)).lower()
 
-    vault, controller = addresses['M7CapVault'], addresses['IndexController']
+    vault, controller = addresses['M7Vault'], addresses['IndexController']
     gateway, valuation = addresses['USDCGateway'], addresses['Valuation']
-    lens = addresses['M7CapLens']
+    lens = addresses['M7Lens']
     for name in CONTRACTS:
         code = rpc.rpc('eth_getCode', [addresses[name], rpc.block['number']])
         deployed = code not in ('0x', '0x0')
@@ -86,8 +85,8 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
     assets = [s['address'].lower() for s in stocks] + [manifest['usdc']['address'].lower()]
     feeds = [s['feed'].lower() for s in stocks] + [manifest['usdc']['feed'].lower()]
 
-    check('vault name', decode_string(rpc.call(vault, 'name()')), 'MAG7 Cap Index')
-    check('vault symbol', decode_string(rpc.call(vault, 'symbol()')), 'M7CAP')
+    check('vault name', decode_string(rpc.call(vault, 'name()')), 'M7 Equal Weight')
+    check('vault symbol', decode_string(rpc.call(vault, 'symbol()')), 'M7')
     check('vault decimals', num(vault, 'decimals()'), 18)
     for i, asset in enumerate(assets):
         check('vault asset %d' % i, addr(vault, 'assets(uint256)', i), asset)
@@ -103,17 +102,7 @@ def verify(rpc, manifest, addresses, expected, artifacts=None, seed=None):
               keccak_text('TRANSFER_%s_POLICY' % scope.upper()))
 
     check('controller vault', addr(controller, 'vault()'), vault)
-    check('controller oracle', addr(controller, 'oracle()'), manifest['uma_oo_v3'].lower())
-    check('controller bond currency', addr(controller, 'bondCurrency()'), assets[7])
-    check('controller bond floor', num(controller, 'bondFloor()'), expected['bond_floor'])
     check('controller valuation', addr(controller, 'valuation()'), valuation)
-    methodology = expected['methodology']
-    check('controller methodology keccak256', num(controller, 'methodologyHash()'),
-          keccak_text(methodology.decode('utf-8')))
-    uri = decode_string(rpc.call(controller, 'methodologyURI()'))
-    check('controller methodology URI is the raw CID of the file', uri, 'ipfs://' + raw_cid(methodology))
-    if expected.get('methodology_uri'):
-        check('controller methodology URI equals METHODOLOGY_URI', uri, expected['methodology_uri'])
 
     for i in range(8):
         check('valuation asset %d' % i, addr(valuation, 'assets(uint256)', i), assets[i])
@@ -185,11 +174,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--broadcast', type=Path, default=ROOT / 'broadcast/Deploy.s.sol/8453/run-latest.json')
     p.add_argument('--manifest', type=Path, default=ROOT / 'config/base.json')
-    p.add_argument('--methodology', type=Path, default=ROOT / 'docs/METHODOLOGY.md')
     p.add_argument('--artifacts', type=Path, default=ROOT / 'out', help='Build output to compare bytecode against')
     p.add_argument('--no-bytecode', action='store_true', help='Skip the runtime bytecode comparison')
-    p.add_argument('--bond-floor', type=int, default=int(os.environ.get('BOND_FLOOR_USDC') or 1_000 * 10**6))
-    p.add_argument('--methodology-uri', default=os.environ.get('METHODOLOGY_URI'))
     p.add_argument('--bootstrapped', action='store_true', help='Also check the state right after Bootstrap.s.sol')
     p.add_argument('--seed', type=Path, default=ROOT / os.environ.get('SEED_FILE', 'config/seed.json'))
     p.add_argument('--write-record', type=Path, help='Write the deployment record, e.g. deployments/base-mainnet.json')
@@ -198,8 +184,7 @@ def main():
     try:
         manifest = json.loads(args.manifest.read_text())
         contracts, deployer = from_broadcast(args.broadcast)
-        expected = {'deployer': deployer, 'bond_floor': args.bond_floor,
-                    'methodology': args.methodology.read_bytes(), 'methodology_uri': args.methodology_uri}
+        expected = {'deployer': deployer}
         artifacts = None if args.no_bytecode else {
             name: json.loads((args.artifacts / (name + '.sol') / (name + '.json')).read_text()) for name in CONTRACTS}
         seed = json.loads(args.seed.read_text()) if args.bootstrapped else None
@@ -215,13 +200,9 @@ def main():
     print(json.dumps(report, indent=2))
     if args.write_record and report['ok']:
         commit, dirty = git_state()
-        methodology = expected['methodology']
         record = {
             'chain_id': 8453, 'verified_at_block': report['block'], 'commit': commit, 'working_tree_dirty': dirty,
-            'toolchain': toolchain(), 'deployer': deployer,
-            'bond_floor_usdc_raw': str(args.bond_floor), 'contracts': contracts,
-            'methodology': {'uri': 'ipfs://' + raw_cid(methodology),
-                            'keccak256': '0x' + format(keccak_text(methodology.decode('utf-8')), '064x')},
+            'toolchain': toolchain(), 'deployer': deployer, 'contracts': contracts,
             'runtime_metadata_matches_build': report.get('metadata_matches'),
         }
         args.write_record.parent.mkdir(parents=True, exist_ok=True)

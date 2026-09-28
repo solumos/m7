@@ -5,13 +5,12 @@ import {Test, Vm} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
-import {M7CapLens} from "../src/M7CapLens.sol";
+import {M7Lens} from "../src/M7Lens.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3, ICoinbaseOracleRegistry} from "../src/Valuation.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
-import {IOptimisticOracleV3} from "../src/interfaces/IOptimisticOracleV3.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
 import {IPolicyRegistry} from "../src/interfaces/IB20Policy.sol";
 import {VaultHarness} from "./mocks/VaultHarness.sol";
@@ -20,9 +19,6 @@ import {VaultHarness} from "./mocks/VaultHarness.sol";
 /// This is a local fork: only USDC is dealt; every B20 is acquired from its actual live-state pool.
 contract BaseForkTest is VaultHarness {
     using SafeERC20 for IERC20;
-
-    string private constant FIXTURE =
-        "Local fork ABI fixture only, not investment data: the seven quantity ratios are 0.1e18 each for the first six stocks and 0.4e18 for the seventh.";
 
     function testBaseNativeB20BootstrapAndUSDCRoundTrip() public {
         _startFork();
@@ -43,8 +39,8 @@ contract BaseForkTest is VaultHarness {
         }
 
         IPolicyRegistry registry = IPolicyRegistry(vm.parseJsonAddress(manifest, ".policy_registry"));
-        (M7CapVault vault,) = _deployVault(assets, routes, router, factory, registry);
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
+        (M7Vault vault,) = _deployVault(assets, routes, router, factory, registry);
+        USDCGateway gateway = new USDCGateway(IM7Vault(address(vault)));
         // Forge mutates only this local fork's standard USDC storage, never native B20 state.
         deal(address(assets[7]), address(this), 2_000e6);
         uint256[8] memory seed;
@@ -96,115 +92,64 @@ contract BaseForkTest is VaultHarness {
         }
     }
 
-    /// @dev Exercises the actual UMA ABI and bond lifecycle, not the correctness of index weights.
-    /// The undisputed assertion uses a synthetic fixture methodology and exists only on the local fork.
-    function testBaseLiveUMAAssertionAndBondRefund() public {
+    /// @dev The quarterly equal-weight reset through the live pinned pools with native B20 transfers. The seed holds
+    ///      twice as much AAPLc by value as each other stock, so the reset sells AAPLc, pays the keeper and buys the
+    ///      rest. Feeds are mocked only to report their fork-time answers as fresh in the next execution window.
+    function testBaseNativeResetToEqualWeightsThroughLivePools() public {
         _startFork();
         IndexController controller = _deployFixtureController();
-        IERC20 usdc = controller.bondCurrency();
-        IOptimisticOracleV3 oracle = controller.oracle();
-
-        // The deployed OOv3's defaultIdentifier remains the retired ASSERT_TRUTH value.
-        oracle.syncUmaParams(bytes32("ASSERT_TRUTH2"), address(usdc));
-        uint256 minimumBond = oracle.getMinimumBond(address(usdc));
-        uint256 bond = minimumBond > 1_000e6 ? minimumBond : 1_000e6;
-        address proposer = makeAddr("Local fork UMA proposer");
-        deal(address(usdc), proposer, bond);
-        uint256 oracleBalanceBefore = usdc.balanceOf(address(oracle));
-        uint256[7] memory ratios = [uint256(0.1e18), 0.1e18, 0.1e18, 0.1e18, 0.1e18, 0.1e18, 0.4e18];
-        uint32 quarter = controller.currentQuarter();
-        vm.startPrank(proposer);
-        usdc.forceApprove(address(controller), bond);
-        bytes32 assertionId =
-            controller.propose(quarter, ratios, "ipfs://local-fork-fixture", sha256(bytes(FIXTURE)));
-        vm.stopPrank();
-
-        IOptimisticOracleV3.Assertion memory assertion = oracle.getAssertion(assertionId);
-        assertEq(assertion.asserter, proposer);
-        assertEq(assertion.escalationManagerSettings.assertingCaller, address(controller));
-        assertEq(assertion.escalationManagerSettings.escalationManager, address(0));
-        assertEq(address(assertion.currency), address(usdc));
-        assertEq(assertion.bond, bond);
-        assertEq(assertion.identifier, bytes32("ASSERT_TRUTH2"));
-        assertEq(assertion.expirationTime - assertion.assertionTime, 72 hours);
-        assertEq(assertion.callbackRecipient, address(0));
-        assertEq(assertion.disputer, address(0));
-        assertFalse(assertion.settled);
-        assertEq(usdc.balanceOf(proposer), 0);
-        assertEq(usdc.balanceOf(address(oracle)), oracleBalanceBefore + bond);
-        assertEq(usdc.balanceOf(address(controller)), 0);
-        assertEq(usdc.allowance(address(controller), address(oracle)), 0);
-        assertEq(uint256(controller.proposal(assertionId).status), uint256(IndexController.Status.Pending));
-        vm.expectRevert();
-        controller.settle(assertionId);
-
-        vm.warp(assertion.expirationTime);
-        vm.prank(makeAddr("Permissionless local fork settler"));
-        assertTrue(controller.settle(assertionId));
-        assertion = oracle.getAssertion(assertionId);
-        assertTrue(assertion.settled);
-        assertTrue(assertion.settlementResolution);
-        assertEq(uint256(controller.proposal(assertionId).status), uint256(IndexController.Status.Accepted));
-        assertEq(usdc.balanceOf(proposer), bond);
-        assertEq(usdc.balanceOf(address(oracle)), oracleBalanceBefore);
-        emit log_named_uint("Live UMA minimum USDC bond (6 decimals)", minimumBond);
-        emit log_named_uint("Local assertion USDC bond refunded (6 decimals)", bond);
-    }
-
-    /// @dev The on-chain planner against the live pinned pools with native B20 transfers: a real UMA acceptance, then
-    ///      one bounded step. Feeds are mocked only to report their fork-time answers as fresh after the time travel.
-    function testBaseNativeRebalanceAgainstLivePools() public {
-        _startFork();
-        IndexController controller = _deployFixtureController();
-        M7CapVault vault = M7CapVault(payable(address(controller.vault())));
-        vault.bootstrap(_buySeed(vault, 150e6), address(this));
-        uint256[7] memory ratios = _oneStepAway(_backing(vault));
-
-        uint256 execution = _executionTime(controller);
-        vm.warp(execution - 73 hours);
-        bytes32 assertionId = _proposeLive(controller, ratios);
-        vm.warp(execution - 1 hours);
-        assertTrue(controller.settle(assertionId));
-        vm.warp(execution);
-        _reportFeedsFresh(controller.valuation());
+        M7Vault vault = M7Vault(payable(address(controller.vault())));
+        uint256[7] memory spend = [uint256(300e6), 150e6, 150e6, 150e6, 150e6, 150e6, 150e6];
+        vault.bootstrap(_buyWeighted(vault, spend), address(this));
+        vm.warp(_nextWindow());
+        Valuation valuation = controller.valuation();
+        _reportFeedsFresh(valuation);
+        address keeper = makeAddr("Base fork keeper");
 
         vm.recordLogs();
         uint256 gasBefore = gasleft();
-        controller.execute(block.timestamp + 1 hours);
-        emit log_named_uint("Rebalance execute gas", gasBefore - gasleft());
-        (uint256 navBefore, uint256 navAfter, uint256 sold, uint256 bought, uint256 legs) =
+        controller.rebalance(block.timestamp + 1 hours, keeper);
+        emit log_named_uint("Reset gas", gasBefore - gasleft());
+        (uint256 navBefore, uint256 navAfter, uint256 sold, uint256 bought, uint256 reward, uint256 legs) =
             _rebalanced(vm.getRecordedLogs());
-        assertTrue(controller.executedQuarter(controller.currentQuarter()));
+        assertFalse(controller.rebalanceDue());
+        assertEq(legs, 7);
         assertGt(sold, 0);
         assertGt(bought, 0);
-        assertLe(navBefore - Math.min(navBefore, navAfter), (sold + bought) / 100, "loss beyond 1% of traded");
-        uint256[7] memory shares = _shares(_backing(vault));
-        for (uint256 i; i < 7; ++i) {
-            assertApproxEqRel(shares[i], ratios[i], 0.003e18, "outside the 30 bp compliance band");
+        assertGt(vault.assets(7).balanceOf(keeper), 0);
+        assertLe(
+            navBefore - Math.min(navBefore, navAfter),
+            (sold + bought) / 100 + reward,
+            "loss beyond 1% of traded value plus the reward"
+        );
+        uint256[8] memory prices = valuation.snapshot();
+        uint256[8] memory held = _backing(vault);
+        (uint256[8] memory values,) = valuation.values(held, prices);
+        for (uint256 i = 1; i < 7; ++i) {
+            assertApproxEqRel(values[i], values[0], 0.003e18, "outside the 30 bp compliance band");
         }
-        assertLe(vault.backing(7), Math.max(navAfter / 10_000 / 1e12, controller.MIN_LEG_USDC()));
-        emit log_named_uint("Rebalance legs", legs);
-        emit log_named_uint("NAV before (1e18 USD)", navBefore);
-        emit log_named_uint("NAV after (1e18 USD)", navAfter);
-        emit log_named_uint("Sold value (1e18 USD)", sold);
-        emit log_named_uint("Bought value (1e18 USD)", bought);
+        emit log_named_decimal_uint("NAV before (USD)", navBefore, 18);
+        emit log_named_decimal_uint("NAV after (USD)", navAfter, 18);
+        emit log_named_decimal_uint("Sold (USD)", sold, 18);
+        emit log_named_decimal_uint("Bought (USD)", bought, 18);
+        emit log_named_decimal_uint("Keeper reward (USD)", reward, 18);
     }
 
     /// @dev Receipt transfers and the resilient exit against the real policy registry and native stock transfers.
     function testBaseNativeTransferGasAndResilientRedemption() public {
         _startFork();
         IndexController controller = _deployFixtureController();
-        M7CapVault vault = M7CapVault(payable(address(controller.vault())));
+        M7Vault vault = M7Vault(payable(address(controller.vault())));
         vault.bootstrap(_buySeed(vault, 50e6), address(this));
         address holder = makeAddr("Base fork holder");
         address receiver = makeAddr("Base fork receiver");
 
         uint256 gasBefore = gasleft();
         require(vault.transfer(holder, 100e18));
-        emit log_named_uint("M7CAP transfer gas, new recipient", gasBefore - gasleft());
+        emit log_named_uint("M7 transfer gas, new recipient", gasBefore - gasleft());
         gasBefore = gasleft();
         require(vault.transfer(holder, 1e18));
-        emit log_named_uint("M7CAP transfer gas, existing recipient", gasBefore - gasleft());
+        emit log_named_uint("M7 transfer gas, existing recipient", gasBefore - gasleft());
 
         uint256[8] memory quote = vault.quoteRedeem(50e18);
         uint256[8] memory noMinimum;
@@ -224,10 +169,10 @@ contract BaseForkTest is VaultHarness {
     function testBaseNativeLensPricesShares() public {
         _startFork();
         IndexController controller = _deployFixtureController();
-        M7CapVault vault = M7CapVault(payable(address(controller.vault())));
-        M7CapLens lens = new M7CapLens(controller);
+        M7Vault vault = M7Vault(payable(address(controller.vault())));
+        M7Lens lens = new M7Lens(controller);
         vault.bootstrap(_buySeed(vault, 100e6), address(this));
-        M7CapLens.Value memory v = lens.value();
+        M7Lens.Value memory v = lens.value();
         uint256 total;
         for (uint256 i; i < 8; ++i) {
             total += v.components[i];
@@ -267,19 +212,10 @@ contract BaseForkTest is VaultHarness {
             ICoinbaseOracleRegistry(vm.parseJsonAddress(manifest, ".registry")),
             vm.parseJsonUint(manifest, ".risk_checks.max_stock_feed_age_seconds")
         );
-        IOptimisticOracleV3 oracle = IOptimisticOracleV3(vm.parseJsonAddress(manifest, ".uma_oo_v3"));
         address predictedVault =
             vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
-        controller = new IndexController(
-            IM7CapVault(predictedVault),
-            oracle,
-            assets[7],
-            1_000e6,
-            keccak256(bytes(FIXTURE)),
-            "ipfs://local-fork-fixture-methodology",
-            valuation
-        );
-        M7CapVault vault = new M7CapVault(
+        controller = new IndexController(IM7Vault(predictedVault), valuation);
+        M7Vault vault = new M7Vault(
             assets,
             _manifestSpacings(manifest),
             address(controller),
@@ -292,11 +228,23 @@ contract BaseForkTest is VaultHarness {
     }
 
     /// @dev Buys `usdcPerStock` of each stock from its pinned pool and approves the vault to take it.
-    function _buySeed(M7CapVault vault, uint256 usdcPerStock) private returns (uint256[8] memory seed) {
+    function _buySeed(M7Vault vault, uint256 usdcPerStock) private returns (uint256[8] memory seed) {
+        uint256[7] memory spend;
+        for (uint256 i; i < 7; ++i) {
+            spend[i] = usdcPerStock;
+        }
+        return _buyWeighted(vault, spend);
+    }
+
+    function _buyWeighted(M7Vault vault, uint256[7] memory spend) private returns (uint256[8] memory seed) {
         IERC20 usdc = vault.assets(7);
         ISlipstreamRouter router = vault.router();
-        deal(address(usdc), address(this), usdcPerStock * 7);
-        usdc.forceApprove(address(router), usdcPerStock * 7);
+        uint256 total;
+        for (uint256 i; i < 7; ++i) {
+            total += spend[i];
+        }
+        deal(address(usdc), address(this), total);
+        usdc.forceApprove(address(router), total);
         for (uint256 i; i < 7; ++i) {
             seed[i] = router.exactInputSingle(
                 ISlipstreamRouter.ExactInputSingleParams({
@@ -305,7 +253,7 @@ contract BaseForkTest is VaultHarness {
                     tickSpacing: vault.tickSpacing(i),
                     recipient: address(this),
                     deadline: block.timestamp,
-                    amountIn: usdcPerStock,
+                    amountIn: spend[i],
                     amountOutMinimum: 1,
                     sqrtPriceLimitX96: 0
                 })
@@ -315,71 +263,18 @@ contract BaseForkTest is VaultHarness {
         usdc.forceApprove(address(router), 0);
     }
 
-    function _backing(M7CapVault vault) private view returns (uint256[8] memory held) {
+    function _backing(M7Vault vault) private view returns (uint256[8] memory held) {
         for (uint256 i; i < 8; ++i) {
             held[i] = vault.backing(i);
         }
     }
 
-    function _shares(uint256[8] memory held) private pure returns (uint256[7] memory shares) {
-        uint256 total;
-        for (uint256 i; i < 7; ++i) {
-            total += held[i];
-        }
-        for (uint256 i; i < 7; ++i) {
-            shares[i] = held[i] * 1e18 / total;
-        }
-    }
-
-    /// @dev Current quantity shares with the first stock 3% heavier and the second 3% lighter: within one step.
-    function _oneStepAway(uint256[8] memory held) private pure returns (uint256[7] memory ratios) {
-        uint256[7] memory quantities;
-        uint256 total;
-        for (uint256 i; i < 7; ++i) {
-            quantities[i] = held[i];
-        }
-        quantities[0] = quantities[0] * 103 / 100;
-        quantities[1] = quantities[1] * 97 / 100;
-        for (uint256 i; i < 7; ++i) {
-            total += quantities[i];
-        }
-        uint256 assigned;
-        for (uint256 i; i < 6; ++i) {
-            ratios[i] = quantities[i] * 1e18 / total;
-            assigned += ratios[i];
-        }
-        ratios[6] = 1e18 - assigned;
-    }
-
-    /// @dev First weekday 16:00 UTC at least 88 hours ahead whose proposal time, 73 hours earlier, is in the same
-    ///      quarter: proposal, settlement and execution must share one quarter.
-    function _executionTime(IndexController controller) private view returns (uint256 t) {
-        t = (block.timestamp / 1 days + 4) * 1 days + 16 hours;
-        while (true) {
-            uint256 dayOfWeek = (t / 1 days + 4) % 7;
-            if (
-                dayOfWeek != 0 && dayOfWeek != 6
-                    && controller.quarterAt(t - 73 hours) == controller.quarterAt(t)
-            ) {
-                return t;
-            }
+    /// @dev The first weekday 16:00 UTC after today: inside the valuation's execution window.
+    function _nextWindow() private view returns (uint256 t) {
+        t = (block.timestamp / 1 days + 1) * 1 days + 16 hours;
+        while ((t / 1 days + 4) % 7 == 0 || (t / 1 days + 4) % 7 == 6) {
             t += 1 days;
         }
-    }
-
-    function _proposeLive(IndexController controller, uint256[7] memory ratios) private returns (bytes32) {
-        IERC20 usdc = controller.bondCurrency();
-        controller.oracle().syncUmaParams(controller.ASSERTION_IDENTIFIER(), address(usdc));
-        uint256 bond = Math.max(controller.bondFloor(), controller.oracle().getMinimumBond(address(usdc)));
-        address proposer = makeAddr("Local fork rebalance proposer");
-        deal(address(usdc), proposer, bond);
-        vm.startPrank(proposer);
-        usdc.forceApprove(address(controller), bond);
-        bytes32 assertionId = controller.propose(
-            controller.currentQuarter(), ratios, "ipfs://local-fork-fixture", sha256(bytes(FIXTURE))
-        );
-        vm.stopPrank();
-        return assertionId;
     }
 
     /// @dev After time travel, report each feed's fork-time answer as updated now. Prices are not changed.
@@ -398,13 +293,20 @@ contract BaseForkTest is VaultHarness {
     function _rebalanced(Vm.Log[] memory logs)
         private
         pure
-        returns (uint256 navBefore, uint256 navAfter, uint256 sold, uint256 bought, uint256 legs)
+        returns (
+            uint256 navBefore,
+            uint256 navAfter,
+            uint256 sold,
+            uint256 bought,
+            uint256 reward,
+            uint256 legs
+        )
     {
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].topics[0] == M7CapVault.RebalanceLeg.selector) ++legs;
+            if (logs[i].topics[0] == M7Vault.RebalanceLeg.selector) ++legs;
             if (logs[i].topics[0] == IndexController.Rebalanced.selector) {
-                (navBefore, navAfter,, sold, bought) =
-                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256));
+                (navBefore, navAfter,, sold, bought, reward) =
+                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256, uint256));
             }
         }
     }

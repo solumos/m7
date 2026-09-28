@@ -1,19 +1,19 @@
-# Read-only M7CAP monitor. Install with the timer; see docs/DEPLOYMENT.md, "Monitoring".
+# Read-only M7 monitor. Install with the timer; see docs/DEPLOYMENT.md, "Monitoring".
 [Unit]
-Description=M7CAP proposal and integration monitor (read-only)
+Description=M7 reset and vault monitor (read-only)
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
-User=m7cap
-Group=m7cap
+User=m7
+Group=m7
 # A checkout of the release commit; the monitor only reads it.
-WorkingDirectory=/opt/m7cap
-EnvironmentFile=/etc/m7cap/monitor.env
+WorkingDirectory=/opt/m7
+EnvironmentFile=/etc/m7/monitor.env
 # The preflight uses Foundry's cast for selectors and Keccak hashes.
-Environment=PATH=/home/m7cap/.foundry/bin:/usr/local/bin:/usr/bin:/bin
-StateDirectory=m7cap-monitor
+Environment=PATH=/home/m7/.foundry/bin:/usr/local/bin:/usr/bin:/bin
+StateDirectory=m7-monitor
 ExecStart=/usr/bin/python3 scripts/monitor.py
 TimeoutStartSec=600
 NoNewPrivileges=true

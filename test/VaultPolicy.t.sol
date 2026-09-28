@@ -2,15 +2,15 @@
 pragma solidity 0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {IPolicyRegistry} from "../src/interfaces/IB20Policy.sol";
 import {GatewayFactory, GatewayRouter} from "./mocks/GatewayMocks.sol";
 import {B20LikeToken, PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {VaultHarness} from "./mocks/VaultHarness.sol";
 
-/// @dev D-02: M7CAP transfers, mints, redemptions and claim withdrawals mirror the stocks' B20 transfer policies.
+/// @dev D-02: M7 transfers, mints, redemptions and claim withdrawals mirror the stocks' B20 transfer policies.
 contract VaultPolicyTest is VaultHarness {
     uint64 constant SENDER = 11;
     uint64 constant RECEIVER = 12;
@@ -18,7 +18,7 @@ contract VaultPolicyTest is VaultHarness {
     PolicyRegistryMock registry;
     GatewayFactory factory;
     GatewayRouter router;
-    M7CapVault vault;
+    M7Vault vault;
     IERC20[8] tokens;
     uint256[8] seed;
     uint256[8] noMinimum;
@@ -48,7 +48,7 @@ contract VaultPolicyTest is VaultHarness {
         require(vault.transfer(alice, 100e18));
     }
 
-    function _deploy() private returns (M7CapVault fresh) {
+    function _deploy() private returns (M7Vault fresh) {
         (fresh,) = _deployVault(tokens, _spacings(10), router, factory, registry);
         for (uint256 i; i < 8; ++i) {
             tokens[i].approve(address(fresh), type(uint256).max);
@@ -60,7 +60,7 @@ contract VaultPolicyTest is VaultHarness {
     }
 
     function _forbidden(bytes32 scope, address account) private view returns (bytes memory) {
-        return abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 2, scope, account);
+        return abi.encodeWithSelector(M7Vault.PolicyForbidden.selector, 2, scope, account);
     }
 
     function testTransfersCheckSenderReceiverAndExecutor() public {
@@ -103,7 +103,7 @@ contract VaultPolicyTest is VaultHarness {
     }
 
     function testSeedLockIsExemptFromTheReceiverPolicy() public {
-        M7CapVault fresh = _deploy();
+        M7Vault fresh = _deploy();
         registry.setBlocked(RECEIVER, address(1), true);
         fresh.bootstrap(seed, address(this));
         assertEq(fresh.balanceOf(address(1)), fresh.LOCKED_SHARES());
@@ -167,16 +167,16 @@ contract VaultPolicyTest is VaultHarness {
     function testLookupFailuresFailClosedForTransfersAndDeferInResilientExits() public {
         registry.setBroken(true);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.PolicyUnavailable.selector, 2));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.PolicyUnavailable.selector, 2));
         vault.transfer(bob, 1e18);
         registry.setBroken(false);
 
         _stock(4).setPolicyLookupReverts(true);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.PolicyUnavailable.selector, 4));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.PolicyUnavailable.selector, 4));
         vault.transfer(bob, 1e18);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.PolicyUnavailable.selector, 4));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.PolicyUnavailable.selector, 4));
         vault.redeemBasket(10e18, noMinimum, bob, block.timestamp);
         vm.prank(alice);
         (uint256[8] memory delivered, uint256[8] memory deferred) =
@@ -187,7 +187,7 @@ contract VaultPolicyTest is VaultHarness {
     }
 
     function testEligibleUserUsesTheGatewayWithPoliciesActive() public {
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
+        USDCGateway gateway = new USDCGateway(IM7Vault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             _stock(i).mint(address(router), 1e20);
         }

@@ -3,5 +3,5 @@
   "vault": "0x0000000000000000000000000000000000000000",
   "receiver": "0x0000000000000000000000000000000000000000",
   "raw_amounts": [0, 0, 0, 0, 0, 0, 0, 0],
-  "note": "Fill reviewed cap-weight seed amounts in canonical asset order. Stocks have 8 decimals; USDC is last and must be zero. This example deliberately cannot bootstrap."
+  "note": "scripts/seed_basket.py writes config/seed.json with equal-dollar amounts in canonical asset order. Stocks have 8 decimals; USDC is last and must be zero. This example deliberately cannot bootstrap."
 }

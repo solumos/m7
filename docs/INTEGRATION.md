@@ -1,6 +1,6 @@
 # Base integration evidence and launch gates
 
-`config/base.json` pins canonical assets and integrations with primary-source URLs. Its `verification` field records a read-only onchain snapshot at Base block **51,830,549**, hash `0xf823c24396bac6cfacb24c8d46a6e3c3555e121bbdfa9b88af2beaa2fcb1f23b`, timestamp **2026-09-26 19:20:45 UTC**. It is historical evidence, not deployment approval. No wallet was used and no live transaction was signed, funded, or broadcast. A subsequent local Base fork executed the full stock acquisition, bootstrap, and gateway round trip, as recorded below.
+`config/base.json` pins canonical assets and integrations with primary-source URLs. Its `verification` field records a read-only onchain snapshot at Base block **51,883,453**, hash `0x2dc51fa84a7ed91413dccd75188657396eafbbe899305ef50875fdea9b24fe88`, timestamp **2026-09-28 00:44:13 UTC**. It is historical evidence, not deployment approval. No wallet was used and no live transaction was signed, funded, or broadcast. Subsequent local Base forks executed the full stock acquisition, bootstrap, gateway round trip and an equal-weight reset, as recorded below.
 
 ## Verified integrations
 
@@ -19,29 +19,20 @@ Anyone can create a pool at an unused enabled tick spacing on this factory, and 
 | Quoter | `0x514c8B5f54112481E28028F1166Bd78501089259` |
 | Coinbase oracle registry | `0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD` |
 | B20 policy registry | `0x8453000000000000000000000000000000000002` |
-| UMA OOv3 | `0x2aBf1Bd76655de80eDB3086114315Eec75AF500c` |
 
-The issuer oracle registry's verified ABI has `getOracleParams(address) -> (uint256 multiplier, bool paused)`. The actual onchain read succeeded for all seven tokens. Transfer sender, receiver, and executor policy IDs were all 5 at the observation block, and the selected pools, router, and quoter were authorized for those policies. Future vault/gateway/holder addresses must be checked individually: a public pool's authorization does not establish theirs. Policies may change. Policy 5 authorized an arbitrary address when probed, so it behaves as a blocklist. The three transfer-scope constants equal the Keccak-256 of their names on every stock; the preflight checks this and the vault requires it. M7CAP applies the same sender, receiver and executor policies to its own holders through the registry at `0x8453…0002`. An address blocked for any stock therefore cannot receive, send or redeem M7CAP. A switch to an allowlist would also freeze M7CAP held by unlisted contracts. [Verified registry source](https://base.blockscout.com/api/v2/smart-contracts/0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD), [B20 interfaces](https://github.com/base/base-std/blob/main/src/interfaces/IB20.sol)
+The issuer oracle registry's verified ABI has `getOracleParams(address) -> (uint256 multiplier, bool paused)`. The actual onchain read succeeded for all seven tokens. Transfer sender, receiver, and executor policy IDs were all 5 at the observation block, and the selected pools, router, and quoter were authorized for those policies. Future vault/gateway/holder addresses must be checked individually: a public pool's authorization does not establish theirs. Policies may change. Policy 5 authorized an arbitrary address when probed, so it behaves as a blocklist. The three transfer-scope constants equal the Keccak-256 of their names on every stock; the preflight checks this and the vault requires it. M7 applies the same sender, receiver and executor policies to its own holders through the registry at `0x8453…0002`. An address blocked for any stock therefore cannot receive, send or redeem M7. A switch to an allowlist would also freeze M7 held by unlisted contracts. [Verified registry source](https://base.blockscout.com/api/v2/smart-contracts/0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD), [B20 interfaces](https://github.com/base/base-std/blob/main/src/interfaces/IB20.sol)
 
-Native USDC has 6 decimals and its USD feed has 8 decimals. The Base sequencer reported up beyond the grace period. UMA's `getMinimumBond(USDC)` returned **500,000,000 raw USDC = 500 USDC**; this is separate bond capital, not stock backing or necessarily a spent fee. Re-query at proposal time. [Circle addresses](https://developers.circle.com/stablecoins/usdc-contract-addresses), [UMA addresses](https://github.com/UMAprotocol/protocol/blob/master/packages/core/networks/8453.json)
-
-## UMA identifier and collateral readiness
-
-A mainnet-fork test exposed an integration trap: the deployed OOv3's `defaultIdentifier()` remains `ASSERT_TRUTH`, although the current IdentifierWhitelist rejects it. Calling `getMinimumBond()` successfully does not establish that an assertion can be made. M7CAP explicitly pins **`ASSERT_TRUTH2`**, with no fallback to the contract default. This replacement is listed in UMA's [approved identifiers](https://docs.uma.xyz/resources/approved-price-identifiers) and [UMIP-191](https://github.com/UMAprotocol/UMIPs/blob/master/UMIPs/umip-191.md).
-
-At block **51,830,957**, the preflight dynamically resolved Finder's IdentifierWhitelist, CollateralWhitelist, Store, Oracle, and OptimisticOracleV3 implementations. It confirmed the selected OOv3 matched Finder, `ASSERT_TRUTH2` was approved, USDC was approved, and the deprecated default was unsupported. The new identifier's bytes32 encoding is `0x4153534552545f54525554483200000000000000000000000000000000000000` (right padding, not numeric left padding). Current Store final fee was 250 USDC and burned-bond fraction was 50%, making the post-sync minimum bond 500 USDC.
-
-`verify_base.py` also records cached identifier/currency/fee values and simulates `syncUmaParams` with `eth_call`; no cache change is persisted onchain. It fails if the explicit identifier or collateral has been removed from the current allowlist, even when an old cache and positive bond value remain. `config/base.json` → `uma_readiness_verification` stores this separate observation. A false support flag for the old default is expected; the pinned identifier's support must be true.
+Native USDC has 6 decimals and its USD feed has 8 decimals. The Base sequencer reported up beyond the grace period. [Circle addresses](https://developers.circle.com/stablecoins/usdc-contract-addresses)
 
 ## Executable quote probes
 
-The quoter successfully simulated exact-output USDC purchases and exact-input stock sales for all seven pairs, for $10, $100, and $1,000 reference-value baskets at the fixed block. **These probes use equal dollar allocations only to exercise liquidity; they are not M7CAP market-cap weights.** Actual quarter-end company-share observations were not supplied and have not been invented.
+The quoter successfully simulated exact-output USDC purchases and exact-input stock sales for all seven pairs, for $10, $100, and $1,000 reference-value baskets at the fixed block. The probes use equal dollar allocations, which are M7's own weights at each reset.
 
 | Reference USD basket value | USDC to buy exact stock quantities | USDC received selling those quantities |
 | ---: | ---: | ---: |
-| 10 | 9.993912 | 9.983896 |
-| 100 | 99.939214 | 99.839267 |
-| 1,000 | 999.392388 | 998.392821 |
+| 10 | 9.995275 | 9.985254 |
+| 100 | 99.952856 | 99.852872 |
+| 1,000 | 999.530154 | 998.527614 |
 
 Buy and sell quotes are independent calls against the same starting block, not consecutive legs of a simulated round trip. Values exclude gas and are relative to the published oracle reference (which can be stale), not an assertion of current fair value. Per-component raw quantities and quote results are in the manifest. An `eth_call` quoter result does not prove that a funded user can complete a seven-swap atomic gateway transaction, including all issuer policy checks.
 
@@ -52,7 +43,7 @@ Both stock and USDC feeds have published 24-hour heartbeats. Stock reference val
 - a **1-hour** sequencer recovery grace period;
 - weekdays **15:00–20:00 UTC**.
 
-A quiet feed inside its 0.5% deviation band is still accurate, so it no longer blocks execution. Holidays fail closed unless a heartbeat lands on them. The planner's per-leg oracle minimums and bounded step limit what a stale-but-accepted price can cost. Quantity-based basket mint/redeem does not use these reference prices. At the captured weekend block the window is closed, and the read preflight correctly reports rebalance ineligible.
+A quiet feed inside its 0.5% deviation band is still accurate, so it no longer blocks execution. Holidays fail closed unless a heartbeat lands on them. The planner's per-leg oracle minimums and bounded step limit what a stale-but-accepted price can cost. Quantity-based basket mint/redeem does not use these reference prices. The captured block falls outside the execution window, and the read preflight correctly reports a reset ineligible.
 
 `scripts/feed_availability.py` replays past windows from each feed's round history. For the ten weekdays from 2026-09-14 to 2026-09-25 (Base block 51,835,998), in ten-minute slots:
 
@@ -65,22 +56,22 @@ Registry pauses and sequencer outages are not replayed. [Feed behavior](https://
 
 ## Native Base fork tests
 
-`test/BaseFork.t.sol` runs the current contracts against live Base state with native B20 execution. On 2026-09-27 all five tests passed with base-anvil `nightly-98e7839c65f6` (base/base `3eb4817`, binaries checked with `gh attestation verify`), under both precompile rule sets: Beryl, which mainnet runs until 2026-09-30 18:00 UTC, and Cobalt after that. Figures below are from the Cobalt run at block **51,869,461**. Each test creates USDC only in local fork storage and acquires every B20 through its actual Slipstream pool. No B20 balance or code is fabricated, and nothing is broadcast.
+`test/BaseFork.t.sol` runs the current contracts against live Base state with native B20 execution. On 2026-09-28 (UTC) all four tests passed with base-anvil `nightly-98e7839c65f6` (base/base `3eb4817`, binaries checked with `gh attestation verify`), under both precompile rule sets: Beryl, which mainnet runs until 2026-09-30 18:00 UTC, and Cobalt after that. Figures are from the Cobalt-rule run, at blocks **51,883,749** to **51,883,797**. Each test creates USDC only in local fork storage and acquires every B20 through its actual Slipstream pool. No B20 balance or code is fabricated, and nothing is broadcast.
 
-- **Round trip** (`testBaseNativeB20BootstrapAndUSDCRoundTrip`). A seed of 100 USDC per stock, an equal-dollar fixture, bootstrapped the vault. The fee-free gateway minted 100 M7CAP for **70.000037 USDC** and redeemed them for **69.929990 USDC**; the difference is pool pricing. Assertions cover shares, refunds, the vault's backing, the gateway holding nothing afterwards, and cleared allowances.
-- **UMA** (`testBaseLiveUMAAssertionAndBondRefund`). The deployed OOv3 with `ASSERT_TRUTH2`: a 500 USDC minimum and 1,000 USDC supplied bond, the 72-hour window, early settlement refused, permissionless acceptance after time travel, and a full bond refund. There are no oracle mocks or whitelist changes, and the claim is a labelled fixture.
-- **Rebalance** (`testBaseNativeRebalanceAgainstLivePools`). A real UMA acceptance of ratios one step from the seed, then `execute` through the live pinned pools. Feeds are mocked only to report their fork-time answers as fresh after the time travel. It made two legs of about $4.50 each, used 563k gas, lost nothing in NAV, and met the 30 bp compliance and cash bounds.
-- **Price per share** (`testBaseNativeLensPricesShares`). `M7CapLens` values a seed bought for 700 USDC at **$0.6997** per share from the live feeds, while its stalest price was 49 hours old over the weekend.
-- **Policies and exits** (`testBaseNativeTransferGasAndResilientRedemption`). M7CAP transfers against the real policy registry cost about 52k gas to a new holder and 28k to an existing one. These are measured inside one test transaction; a standalone transfer also pays cold account access. `redeemBasketWithClaims` delivered every leg, with no claims.
+- **Round trip** (`testBaseNativeB20BootstrapAndUSDCRoundTrip`). A seed of 100 USDC per stock, an equal-dollar fixture, bootstrapped the vault. The fee-free gateway minted 100 M7 for **70.000076 USDC** and redeemed them for **69.930045 USDC**; the difference is pool pricing. Assertions cover shares, refunds, the vault's backing, the gateway holding nothing afterwards, and cleared allowances.
+- **Reset** (`testBaseNativeResetToEqualWeightsThroughLivePools`). A seed holding twice as much AAPLc by value as each other stock is reset to equal weights through the live pinned pools, in the next weekday execution window. Feeds are mocked only to report their fork-time answers as fresh. At block 51,883,777 it made seven trades using 1.16M gas: it sold $128.64 of AAPLc and bought $128.42 of the other six, paid the caller a $0.06 reward (0.5 bp), and the vault's $1,199.75 became $1,199.51 including the reward, within the 1% bound.
+- **Price per share** (`testBaseNativeLensPricesShares`). `M7Lens` values a seed bought for 700 USDC at **$0.6998** per share from the live feeds, while its stalest price was 12 hours old.
+- **Policies and exits** (`testBaseNativeTransferGasAndResilientRedemption`). M7 transfers against the real policy registry cost about 52k gas to a new holder and 28k to an existing one. These are measured inside one test transaction; a standalone transfer also pays cold account access. `redeemBasketWithClaims` delivered every leg, with no claims.
 
 `script/rehearse.sh` also ran the mainnet runbook end to end on a local base-anvil fork under both rule sets:
-- deploy, and 65 deployment checks with bytecode matching the build;
-- the seed bought for 999.84 USDC against a $1,000 oracle value;
-- bootstrap, and 85 post-bootstrap checks;
+- deploy, and 63 deployment checks with bytecode matching the build;
+- an equal-dollar seed worth 1,000 USDC at oracle prices, bought for 999.21 USDC;
+- bootstrap, and 84 post-bootstrap checks;
 - gateway and in-kind smoke tests;
-- a fixture proposal, 72 hours of time travel, settlement, and the monitor.
+- the reset status check and the monitor;
+- the first reset with the runbook's `Rebalance` script. The rehearsal ran outside the execution window, so the valuation refused it (`OutsideExecutionWindow`) and nothing changed.
 
-Before the remediation, the round trip and UMA tests had passed at block 51,830,602 with base-anvil v1.1.0. The machine-readable record is `config/base.json` → `native_fork_verification`. The tests are opt-in (`BASE_FORK_TEST=true`, `FOUNDRY_BASE=beryl|cobalt`) and need the Base-specific `forge`; the ordinary suite skips them. Still unvalidated: the disputed cross-chain UMA path, production observations and addresses, and anything with live funds.
+An earlier, cap-weighted design's round trip had passed at block 51,830,602 with base-anvil v1.1.0. The machine-readable record is `config/base.json` → `native_fork_verification`. The tests are opt-in (`BASE_FORK_TEST=true`, `FOUNDRY_BASE=beryl|cobalt`) and need the Base-specific `forge`; the ordinary suite skips them. Still unvalidated: production addresses, anything with live funds, and the runbook's reset script inside a live execution window.
 
 ## Reproduce and complete acceptance
 
@@ -88,18 +79,17 @@ With Python 3.9+ and Foundry `cast` installed:
 
 ```sh
 python3 scripts/verify_base.py
-python3 scripts/verify_base.py --rpc "$BASE_RPC_URL" --snapshot snapshot.json --account 0xYOUR_VAULT --account 0xYOUR_GATEWAY
+python3 scripts/verify_base.py --rpc "$BASE_RPC_URL" --reads-only --account 0xYOUR_VAULT --account 0xYOUR_GATEWAY
 python3 -m unittest discover -s test -p 'test_*.py'
 ```
 
-The second command requires real addresses and the output of `index_snapshot.py`; the placeholder strings intentionally cannot be submitted. `--snapshot` uses that snapshot's human quantity ratios valued at the current feed snapshot to apportion the liquidity probes. It does not validate company capitalization evidence. Every onchain read is pinned to one block. The script requires Base chain ID 8453, validates identities/decimals, reads issuer pauses/policies, checks pool identity/liquidity and router factories, verifies the explicit UMA identifier/collateral through current Finder allowlists and post-sync bond requirements, and obtains both quote directions. Unknown, invalid, or failed reads exit nonzero; stale prices also exit nonzero. JSON always includes `launch_ready: false`, because no collection of these read checks establishes full production readiness. Default RPC is `https://base-rpc.publicnode.com`; a configured authenticated provider is preferable for repeated monitoring.
+The second command requires real addresses. Every onchain read is pinned to one block. The script requires Base chain ID 8453, validates identities and decimals, reads issuer pauses and policies, checks pool identity, liquidity and router factories, and quotes equal-dollar baskets in both directions. Unknown, invalid, or failed reads exit nonzero; without `--reads-only`, prices unusable for a reset also exit nonzero. JSON always includes `launch_ready: false`, because no collection of these read checks establishes full production readiness. Default RPC is `https://base-rpc.publicnode.com`; a configured authenticated provider is preferable for repeated monitoring.
 
 Before seeding, complete the gates in [the deployment runbook](DEPLOYMENT.md):
 
-1. Produce and independently review sourced quarter-end observations and the bootstrap basket; exercise the actual market-cap allocation with `--snapshot`.
-2. Re-run the native tests and `script/rehearse.sh` on a post-Cobalt block, then verify the deployment with `scripts/verify_deployment.py` before funding it.
-3. Establish the permitted wrapper distribution and issuer eligibility, and publish the immutable methodology and evidence. The owner has decided to launch without an independent security review.
-4. Fund and operate UMA proposal and dispute monitoring (`scripts/monitor.py`); test alerting before the first assertion. Public CLI reads alone are not a continuously running monitor.
-5. Re-run current source verification and read checks immediately before any deployment or bootstrap. Passing historical quotes does not reserve liquidity.
+1. Re-run the native tests and `script/rehearse.sh` on a post-Cobalt block, then verify the deployment with `scripts/verify_deployment.py` before funding it.
+2. Establish the permitted wrapper distribution and issuer eligibility. The owner has decided to launch without an independent security review.
+3. Run `scripts/monitor.py` on an always-on server and test its alerting. Public CLI reads alone are not a continuously running monitor.
+4. Re-run current source verification and read checks immediately before any deployment or bootstrap. Passing historical quotes does not reserve liquidity.
 
-No dedicated M7CAP/USDC liquidity pool is required. The ~$1,000 is seed backing; fees paid to existing pools, deployment gas, audits, monitoring, and oracle bonds are additional costs. The precision reserve permanently locks 10 of the initial 1,000 M7CAP shares (about $10 of a $1,000 seed). The reviewed bootstrap must hold at least 0.01 of every stock token to satisfy the minimum projected reserve of 10,000 raw units per stock. See the [first](AUDIT.md) and [second](AUDIT-2.md) internal reviews for the findings, fixes and residual risks.
+No dedicated M7/USDC liquidity pool is required. Fees paid to existing pools, deployment gas and monitoring are the only other costs. The precision reserve permanently locks 10 of the initial 1,000 M7 shares, 1% of the seed. The bootstrap must hold at least 0.01 of every stock token to satisfy the minimum projected reserve of 10,000 raw units per stock, about $53 of seed at current prices. See the [first](AUDIT.md) and [second](AUDIT-2.md) internal reviews for the earlier design's findings, fixes and residual risks.

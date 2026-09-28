@@ -4,9 +4,9 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {GatewayToken, GatewayFactory, GatewayRouter} from "./mocks/GatewayMocks.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {VaultHarness} from "./mocks/VaultHarness.sol";
@@ -16,7 +16,7 @@ contract USDCGatewayTest is VaultHarness {
     GatewayToken internal usdc;
     GatewayFactory internal factory;
     GatewayRouter internal router;
-    M7CapVault internal vault;
+    M7Vault internal vault;
     USDCGateway internal gateway;
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
@@ -32,7 +32,7 @@ contract USDCGatewayTest is VaultHarness {
             factory.setPool(address(usdc), address(assets[i]), 100, address(uint160(i + 100)));
         }
         (vault,) = _deployVault(assets, _spacings(100), router, factory, new PolicyRegistryMock());
-        gateway = new USDCGateway(IM7CapVault(address(vault)));
+        gateway = new USDCGateway(IM7Vault(address(vault)));
 
         uint256[8] memory seed;
         for (uint256 i; i < 8; ++i) {
@@ -216,7 +216,7 @@ contract USDCGatewayTest is VaultHarness {
 
     function testConstructorRejectsMissingVault() public {
         vm.expectRevert(USDCGateway.InvalidConfiguration.selector);
-        new USDCGateway(IM7CapVault(address(0)));
+        new USDCGateway(IM7Vault(address(0)));
     }
 
     function testFuzzRoundTripNeverSpendsMoreThanMaxOrPaysOutGatewayDonations(uint256 shares) public {

@@ -1,5 +1,7 @@
 # M7CAP security review — 2026-09-26
 
+> **Status after the redesign (2026-09-27).** M7CAP has since been redesigned as **M7, "M7 Equal Weight"**, and its contracts renamed (`M7CapVault` → `M7Vault`, `M7CapLens` → `M7Lens`). UMA governance is gone: an autonomous quarterly reset that anyone may trigger returns the basket to equal value using only onchain prices, and pays the caller at most 0.5 bp of NAV, capped at $25. The gateway has no owner and no fee, and no contract has an owner. This review describes the earlier design and was not repeated on the new code. Findings about proposals, disputes and assertions (L-01) no longer apply. The planner findings still apply to the reset, which reuses that planner, and so do the vault, gateway and policy findings. See [METHODOLOGY.md](METHODOLOGY.md) for the current rules.
+
 ## Scope and conclusion
 
 Reviewed commit [`ac11b0930af0a778a0d37a90b49ede5add359df4`](https://github.com/solumos/mag7/tree/ac11b0930af0a778a0d37a90b49ede5add359df4): all custom contracts and interfaces, deployment/maintenance scripts, observation compiler, preflight, monitor, methodology, and tests. This revision includes a fix for **M-01 only**. This is an internal, AI-assisted review with independent parallel review passes, not an external audit firm's attestation or formal verification.

@@ -3,7 +3,6 @@ pragma solidity 0.8.30;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IOptimisticOracleV3} from "../../src/interfaces/IOptimisticOracleV3.sol";
 import {IAggregatorV3, ICoinbaseOracleRegistry} from "../../src/Valuation.sol";
 import {Swap} from "../../src/Types.sol";
 import {B20PolicyMixin} from "./PolicyMocks.sol";
@@ -78,84 +77,6 @@ contract ControllerRegistry is ICoinbaseOracleRegistry {
     }
 }
 
-contract ControllerOracle is IOptimisticOracleV3 {
-    mapping(bytes32 => Assertion) private _assertions;
-    mapping(bytes32 => bool) public disputedResolved;
-    uint256 public minimumBond = 500e6;
-    uint256 public nonce;
-    uint256 public syncCount;
-    bytes public lastClaim;
-
-    function defaultIdentifier() external pure returns (bytes32) {
-        return "ASSERT_TRUTH";
-    }
-
-    function syncUmaParams(bytes32, address) external {
-        ++syncCount;
-    }
-
-    function getMinimumBond(address) external view returns (uint256) {
-        return minimumBond;
-    }
-
-    function setMinimumBond(uint256 minimumBond_) external {
-        minimumBond = minimumBond_;
-    }
-
-    function getAssertion(bytes32 id) external view returns (Assertion memory) {
-        return _assertions[id];
-    }
-
-    function dispute(bytes32 id) external {
-        _assertions[id].disputer = msg.sender;
-    }
-
-    function resolveDispute(bytes32 id, bool result) external {
-        disputedResolved[id] = true;
-        _assertions[id].settlementResolution = result;
-    }
-
-    function assertTruth(
-        bytes memory claim,
-        address asserter,
-        address callbackRecipient,
-        address escalationManager,
-        uint64 liveness,
-        IERC20 currency,
-        uint256 bond,
-        bytes32 identifier,
-        bytes32 domainId
-    ) external returns (bytes32 id) {
-        // Match live Base: the immutable default remains deprecated, while this replacement is whitelisted.
-        require(identifier == bytes32("ASSERT_TRUTH2"), "Unsupported identifier");
-        require(bond >= minimumBond, "low bond");
-        require(currency.transferFrom(msg.sender, address(this), bond));
-        id = keccak256(abi.encode(++nonce, claim));
-        lastClaim = claim;
-        Assertion storage a = _assertions[id];
-        a.asserter = asserter;
-        a.assertionTime = uint64(block.timestamp);
-        a.expirationTime = uint64(block.timestamp) + liveness;
-        a.currency = currency;
-        a.bond = bond;
-        a.identifier = identifier;
-        a.domainId = domainId;
-        a.callbackRecipient = callbackRecipient;
-        a.escalationManagerSettings.escalationManager = escalationManager;
-    }
-
-    function settleAndGetAssertionResult(bytes32 id) external returns (bool result) {
-        Assertion storage a = _assertions[id];
-        if (a.settled) return a.settlementResolution;
-        require(block.timestamp >= a.expirationTime, "liveness");
-        require(a.disputer == address(0) || disputedResolved[id], "unresolved dispute");
-        result = a.disputer == address(0) || a.settlementResolution;
-        a.settlementResolution = result;
-        a.settled = true;
-        require(a.currency.transfer(result ? a.asserter : a.disputer, a.bond));
-    }
-}
-
 /// @dev Test-only vault double for the controller. Each leg converts at fair value from the live mock feeds,
 ///      scaled by `outputBps`. Optional scripted balances, dilution and a mid-execution feed change let the
 ///      controller's postconditions be tested adversarially.
@@ -217,6 +138,16 @@ contract ControllerVault is ERC20 {
 
     function legAt(uint256 index) external view returns (Swap memory) {
         return _legs[index];
+    }
+
+    uint256 public rewardPaid;
+    address public rewardRecipient;
+
+    function payReward(address to, uint256 amount) external {
+        require(amount != 0 && amount <= _assets[7].balanceOf(address(this)), "reward");
+        rewardPaid += amount;
+        rewardRecipient = to;
+        require(_assets[7].transfer(to, amount), "reward transfer");
     }
 
     function rebalance(Swap[] calldata swaps, uint256 deadline) external {

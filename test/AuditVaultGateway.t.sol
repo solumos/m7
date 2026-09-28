@@ -2,10 +2,10 @@
 pragma solidity 0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
-import {VaultTestToken, VaultTestRouter} from "./M7CapVault.t.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
+import {VaultTestToken, VaultTestRouter} from "./M7Vault.t.sol";
 import {GatewayFactory, GatewayRouter} from "./mocks/GatewayMocks.sol";
 import {B20LikeToken, PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {VaultHarness} from "./mocks/VaultHarness.sol";
@@ -14,7 +14,7 @@ import {VaultHarness} from "./mocks/VaultHarness.sol";
 contract AuditVaultGatewayTest is VaultHarness {
     uint64 constant POLICY = 5;
 
-    // D-02 regression: a stock's address policy now applies to M7CAP holders on every path.
+    // D-02 regression: a stock's address policy now applies to M7 holders on every path.
     function testStockAddressExclusionPropagatesToReceiptHolders() public {
         PolicyRegistryMock registry = new PolicyRegistryMock();
         IERC20[8] memory tokens;
@@ -33,8 +33,8 @@ contract AuditVaultGatewayTest is VaultHarness {
         for (uint256 i; i < 7; ++i) {
             factory.setPool(address(tokens[i]), address(tokens[7]), 10, address(router));
         }
-        (M7CapVault vault,) = _deployVault(tokens, _spacings(10), router, factory, registry);
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
+        (M7Vault vault,) = _deployVault(tokens, _spacings(10), router, factory, registry);
+        USDCGateway gateway = new USDCGateway(IM7Vault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             B20LikeToken(address(tokens[i])).mint(address(router), 1_000e8);
             tokens[i].approve(address(vault), type(uint256).max);
@@ -46,17 +46,17 @@ contract AuditVaultGatewayTest is VaultHarness {
         vm.expectRevert("policy forbids");
         tokens[0].transfer(excluded, 1);
 
-        // Formerly the excluded user bought ten M7CAP with USDC; now the receipt cannot be issued to them.
+        // Formerly the excluded user bought ten M7 with USDC; now the receipt cannot be issued to them.
         B20LikeToken(address(tokens[7])).mint(excluded, 100e6);
         vm.startPrank(excluded);
         tokens[7].approve(address(gateway), 1e6);
         vm.expectRevert(
-            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.receiverScope(), excluded)
+            abi.encodeWithSelector(M7Vault.PolicyForbidden.selector, 0, vault.receiverScope(), excluded)
         );
         gateway.mintWithUSDC(10e18, 1e6, excluded, block.timestamp);
         vm.stopPrank();
         vm.expectRevert(
-            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.receiverScope(), excluded)
+            abi.encodeWithSelector(M7Vault.PolicyForbidden.selector, 0, vault.receiverScope(), excluded)
         );
         vault.transfer(excluded, 1e18);
 
@@ -67,12 +67,12 @@ contract AuditVaultGatewayTest is VaultHarness {
         vm.startPrank(holder);
         vault.approve(address(gateway), 10e18);
         vm.expectRevert(
-            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
+            abi.encodeWithSelector(M7Vault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
         );
         gateway.redeemToUSDC(10e18, 0, holder, block.timestamp);
         uint256[8] memory noMinimum;
         vm.expectRevert(
-            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
+            abi.encodeWithSelector(M7Vault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
         );
         vault.redeemBasket(10e18, noMinimum, address(0xca11), block.timestamp);
 
@@ -84,7 +84,7 @@ contract AuditVaultGatewayTest is VaultHarness {
         assertEq(tokens[1].balanceOf(address(0xca11)), delivered[1]);
         assertGt(delivered[1], 0);
         vm.expectRevert(
-            abi.encodeWithSelector(M7CapVault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
+            abi.encodeWithSelector(M7Vault.PolicyForbidden.selector, 0, vault.senderScope(), holder)
         );
         vault.withdrawClaim(0, deferred[0], address(0xca11));
         vm.stopPrank();
@@ -103,7 +103,7 @@ contract AuditVaultGatewayTest is VaultHarness {
             if (i < 7) seed[i] = (i + 1) * 1e8;
         }
         VaultTestRouter router = new VaultTestRouter();
-        (M7CapVault vault,) = _deployVault(tokens, _spacings(10), router, router, new PolicyRegistryMock());
+        (M7Vault vault,) = _deployVault(tokens, _spacings(10), router, router, new PolicyRegistryMock());
         for (uint256 i; i < 8; ++i) {
             tokens[i].approve(address(vault), type(uint256).max);
         }

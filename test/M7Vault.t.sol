@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
 import {IPolicyRegistry} from "../src/interfaces/IB20Policy.sol";
 import {Swap} from "../src/Types.sol";
@@ -79,8 +79,8 @@ contract VaultTestRouter is ISlipstreamRouter, ISlipstreamFactory {
     }
 }
 
-contract M7CapVaultTest is VaultHarness {
-    M7CapVault internal vault;
+contract M7VaultTest is VaultHarness {
+    M7Vault internal vault;
     ControllerStub internal stub;
     PolicyRegistryMock internal registry;
     IERC20[8] internal tokens;
@@ -111,10 +111,10 @@ contract M7CapVaultTest is VaultHarness {
         for (uint256 i; i < 8; ++i) {
             assertEq(tokens[i].balanceOf(address(vault)), seed[i]);
         }
-        vm.expectRevert(M7CapVault.AlreadyInitialized.selector);
+        vm.expectRevert(M7Vault.AlreadyInitialized.selector);
         vault.bootstrap(seed, bob);
         vm.prank(alice);
-        vm.expectRevert(M7CapVault.Unauthorized.selector);
+        vm.expectRevert(M7Vault.Unauthorized.selector);
         vault.bootstrap(seed, alice);
     }
 
@@ -159,7 +159,7 @@ contract M7CapVaultTest is VaultHarness {
     function testMintInputLimitAndDonationFrontRun() public {
         uint256[8] memory quote = vault.quoteMint(1e18);
         tokens[0].transfer(address(vault), 1e8);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InputLimit.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InputLimit.selector, 0));
         vault.mintBasket(1e18, quote, alice, block.timestamp);
         assertEq(vault.balanceOf(alice), 0);
     }
@@ -181,7 +181,7 @@ contract M7CapVaultTest is VaultHarness {
         uint256[8] memory amounts = vault.quoteRedeem(100e18);
         assertEq(amounts[0], 0);
         assertGt(amounts[1], 0);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.MissingComponent.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.MissingComponent.selector, 0));
         vault.quoteMint(1e18);
         vault.redeemBasket(100e18, amounts, bob, block.timestamp);
         assertEq(tokens[1].balanceOf(bob), amounts[1]);
@@ -190,7 +190,7 @@ contract M7CapVaultTest is VaultHarness {
     function testFeeOnTransferFailsWithoutMinting() public {
         uint256[8] memory amounts = vault.quoteMint(100e18);
         VaultTestToken(address(tokens[1])).setTaxed(true);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.TransferMismatch.selector, 1));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.TransferMismatch.selector, 1));
         vault.mintBasket(100e18, amounts, alice, block.timestamp);
         assertEq(vault.totalSupply(), 1_000e18);
         assertEq(tokens[0].balanceOf(address(vault)), seed[0]);
@@ -199,21 +199,21 @@ contract M7CapVaultTest is VaultHarness {
     function testRedeemMinimumAndExpiredCalls() public {
         uint256[8] memory amounts = vault.quoteRedeem(1e18);
         amounts[3] += 1;
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.OutputLimit.selector, 3));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.OutputLimit.selector, 3));
         vault.redeemBasket(1e18, amounts, bob, block.timestamp);
         vm.warp(100);
-        vm.expectRevert(M7CapVault.Expired.selector);
+        vm.expectRevert(M7Vault.Expired.selector);
         vault.redeemBasket(1e18, amounts, bob, 99);
-        vm.expectRevert(M7CapVault.Expired.selector);
+        vm.expectRevert(M7Vault.Expired.selector);
         vault.mintBasket(1e18, amounts, bob, 99);
     }
 
     function testNobodyCanRedeemLockedSharesOrSendBasketToVault() public {
         uint256 supply = vault.totalSupply();
-        vm.expectRevert(M7CapVault.InvalidAmount.selector);
+        vm.expectRevert(M7Vault.InvalidAmount.selector);
         vault.quoteRedeem(supply);
         uint256[8] memory amounts;
-        vm.expectRevert(M7CapVault.InvalidReceiver.selector);
+        vm.expectRevert(M7Vault.InvalidReceiver.selector);
         vault.redeemBasket(1e18, amounts, address(vault), block.timestamp);
     }
 
@@ -221,12 +221,12 @@ contract M7CapVaultTest is VaultHarness {
         Swap[] memory swaps = new Swap[](1);
         swaps[0] = Swap({tokenIn: 0, tokenOut: 7, amountIn: 1e6, minAmountOut: 1e6});
         vm.prank(alice);
-        vm.expectRevert(M7CapVault.Unauthorized.selector);
+        vm.expectRevert(M7Vault.Unauthorized.selector);
         vault.rebalance(swaps, block.timestamp);
         swaps[0].tokenOut = 1; // stock-to-stock
-        vm.expectRevert(M7CapVault.InvalidSwap.selector);
+        vm.expectRevert(M7Vault.InvalidSwap.selector);
         stub.rebalance(swaps, block.timestamp);
-        vm.expectRevert(M7CapVault.InvalidSwap.selector);
+        vm.expectRevert(M7Vault.InvalidSwap.selector);
         stub.rebalance(new Swap[](0), block.timestamp);
     }
 
@@ -234,25 +234,25 @@ contract M7CapVaultTest is VaultHarness {
         Swap[] memory mixed = new Swap[](2);
         mixed[0] = Swap({tokenIn: 0, tokenOut: 7, amountIn: 1e6, minAmountOut: 1});
         mixed[1] = Swap({tokenIn: 7, tokenOut: 1, amountIn: 1, minAmountOut: 1});
-        vm.expectRevert(M7CapVault.InvalidSwap.selector);
+        vm.expectRevert(M7Vault.InvalidSwap.selector);
         stub.rebalance(mixed, block.timestamp);
 
         Swap[] memory repeated = new Swap[](2);
         repeated[0] = Swap({tokenIn: 0, tokenOut: 7, amountIn: 1e6, minAmountOut: 1});
         repeated[1] = repeated[0];
-        vm.expectRevert(M7CapVault.InvalidSwap.selector);
+        vm.expectRevert(M7Vault.InvalidSwap.selector);
         stub.rebalance(repeated, block.timestamp);
 
         Swap[] memory tooMany = new Swap[](8);
         for (uint256 i; i < 8; ++i) {
             tooMany[i] = Swap({tokenIn: uint8(i % 7), tokenOut: 7, amountIn: 1, minAmountOut: 1});
         }
-        vm.expectRevert(M7CapVault.InvalidSwap.selector);
+        vm.expectRevert(M7Vault.InvalidSwap.selector);
         stub.rebalance(tooMany, block.timestamp);
 
         Swap[] memory excessive = new Swap[](1);
         excessive[0] = Swap({tokenIn: 0, tokenOut: 7, amountIn: seed[0] + 1, minAmountOut: 1});
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.ExceedsBacking.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.ExceedsBacking.selector, 0));
         stub.rebalance(excessive, block.timestamp);
     }
 
@@ -267,22 +267,22 @@ contract M7CapVaultTest is VaultHarness {
 
     function testConstructorPinsExistingPoolsAndRequiresControllerBinding() public {
         router.setPoolExists(false);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InvalidPool.selector, 0));
-        new M7CapVault(tokens, _spacings(10), address(stub), router, router, registry, address(this));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InvalidPool.selector, 0));
+        new M7Vault(tokens, _spacings(10), address(stub), router, router, registry, address(this));
         router.setPoolExists(true);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InvalidPool.selector, 0));
-        new M7CapVault(tokens, _spacings(0), address(stub), router, router, registry, address(this));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InvalidPool.selector, 0));
+        new M7Vault(tokens, _spacings(0), address(stub), router, router, registry, address(this));
         // The stub is bound to the existing vault, so any new vault is refused.
-        vm.expectRevert(M7CapVault.InvalidConfiguration.selector);
-        new M7CapVault(tokens, _spacings(10), address(stub), router, router, registry, address(this));
-        vm.expectRevert(M7CapVault.InvalidConfiguration.selector);
-        new M7CapVault(
+        vm.expectRevert(M7Vault.InvalidConfiguration.selector);
+        new M7Vault(tokens, _spacings(10), address(stub), router, router, registry, address(this));
+        vm.expectRevert(M7Vault.InvalidConfiguration.selector);
+        new M7Vault(
             tokens, _spacings(10), address(stub), router, router, IPolicyRegistry(address(0)), address(this)
         );
         assertEq(vault.tickSpacing(6), 10);
-        vm.expectRevert(M7CapVault.InvalidIndex.selector);
+        vm.expectRevert(M7Vault.InvalidIndex.selector);
         vault.tickSpacing(7);
-        vm.expectRevert(M7CapVault.InvalidIndex.selector);
+        vm.expectRevert(M7Vault.InvalidIndex.selector);
         vault.assets(8);
     }
 
@@ -298,7 +298,7 @@ contract M7CapVaultTest is VaultHarness {
     }
 
     function testBootstrapRejectsInsufficientReserveAtomically() public {
-        (M7CapVault fresh,) = _deployVault(tokens, _spacings(10), router, router, registry);
+        (M7Vault fresh,) = _deployVault(tokens, _spacings(10), router, router, registry);
         uint256[8] memory amounts;
         for (uint256 i; i < 7; ++i) {
             amounts[i] = 1e6; // Exactly 10,000 locked raw units at the 1% lock fraction.
@@ -306,7 +306,7 @@ contract M7CapVaultTest is VaultHarness {
         }
         amounts[6] -= 1;
         uint256 senderBalance = tokens[0].balanceOf(address(this));
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 6));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientLockedBacking.selector, 6));
         fresh.bootstrap(amounts, address(this));
         assertEq(fresh.totalSupply(), 0);
         assertEq(tokens[0].balanceOf(address(this)), senderBalance);
@@ -324,7 +324,7 @@ contract M7CapVaultTest is VaultHarness {
         Swap[] memory swaps = new Swap[](2);
         swaps[0] = Swap({tokenIn: 1, tokenOut: 7, amountIn: 1e6, minAmountOut: 2e6});
         swaps[1] = Swap({tokenIn: 0, tokenOut: 7, amountIn: seed[0] - 1e6 + 1, minAmountOut: 3e6});
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientLockedBacking.selector, 0));
         stub.rebalance(swaps, block.timestamp);
         for (uint256 i; i < 8; ++i) {
             assertEq(tokens[i].balanceOf(address(vault)), seed[i]);
@@ -335,10 +335,10 @@ contract M7CapVaultTest is VaultHarness {
 
     function testPartialSeizureBelowPrecisionFloorBlocksMintButAllowsExit() public {
         VaultTestToken(address(tokens[0])).seize(address(vault), seed[0] - 999_999);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientLockedBacking.selector, 0));
         vault.quoteMint(1e18);
         uint256[8] memory maximums;
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientLockedBacking.selector, 0));
         vault.mintBasket(1e18, maximums, alice, block.timestamp);
 
         uint256 circulating = vault.balanceOf(address(this));
@@ -354,7 +354,7 @@ contract M7CapVaultTest is VaultHarness {
         // Unequal, non-divisible seed positions exercise rounding rather than exact multiples.
         uint256 firstBalance = bound(uint256(rawBalance), 1e6, 1e12);
         uint256 cycles = bound(uint256(rawCycles), 1, 5);
-        (M7CapVault fresh,) = _deployVault(tokens, _spacings(10), router, router, registry);
+        (M7Vault fresh,) = _deployVault(tokens, _spacings(10), router, router, registry);
         uint256[8] memory initial;
         for (uint256 i; i < 7; ++i) {
             initial[i] = firstBalance * (i + 1) + i + 1;

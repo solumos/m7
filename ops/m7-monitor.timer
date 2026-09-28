@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the M7CAP monitor every 15 minutes
+Description=Run the M7 monitor every 15 minutes
 
 [Timer]
 OnCalendar=*:0/15

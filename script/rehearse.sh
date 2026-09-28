@@ -27,7 +27,7 @@ FORK_SOURCE=$BASE_RPC_URL
 step() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'REHEARSAL FAILED: %s\n' "$*" >&2; exit 1; }
 # A named rehearsal account: the last 20 bytes of keccak256(name). Nobody holds its key; the fork impersonates it.
-account() { cast to-check-sum-address "0x$(cast keccak "M7CAP rehearsal $1" | cut -c 27-66)"; }
+account() { cast to-check-sum-address "0x$(cast keccak "M7 rehearsal $1" | cut -c 27-66)"; }
 fund() { # fund <address> <usdc raw>: 10 ETH and a USDC balance written into USDC's balance mapping (slot 9)
   cast rpc --rpc-url "$LOCAL" anvil_setBalance "$1" 0x8AC7230489E80000 >/dev/null
   cast rpc --rpc-url "$LOCAL" anvil_setStorageAt "$USDC" "$(cast index address "$1" 9)" \
@@ -39,7 +39,8 @@ forge_script() { # forge_script <script:contract> <sender>
     { tail -40 "$WORK/logs/$(echo "$1" | tr '/:' '__').log"; fail "$1"; }
 }
 send() { # cast send exits 0 even when the transaction reverts, so check the receipt's status
-  cast send --rpc-url "$LOCAL" --unlocked --json "$@" >"$WORK/logs/send.log" 2>&1 ||
+  # A fixed gas limit: the fork's gas estimates for B20 precompile calls can come out too low.
+  cast send --rpc-url "$LOCAL" --unlocked --json --gas-limit 8000000 "$@" >"$WORK/logs/send.log" 2>&1 ||
     { cat "$WORK/logs/send.log"; fail "cast send $* (a fork source without recent history fails here)"; }
   if [ "$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "$WORK/logs/send.log")" != 0x1 ]; then
     cast call --rpc-url "$LOCAL" "$@" 2>&1 | tail -3  # replays the call to show the revert reason
@@ -49,9 +50,9 @@ send() { # cast send exits 0 even when the transaction reverts, so check the rec
 
 monitor_ok() { # readable, and no critical alert except the quarter deadline (real near a quarter end)
   sed -n '/^{/,$p' "$1" | python3 -c 'import json, sys; d = json.load(sys.stdin); sys.exit(not d["readable"] or any(
-    a["level"] == "critical" and not a["message"].startswith("Quarter ends in") for a in d["alerts"]))'
+    a["level"] == "critical" and not a["message"].startswith("The quarter ends at") for a in d["alerts"]))'
 }
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/m7cap-rehearsal.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/m7-rehearsal.XXXXXX")
 mkdir -p "$WORK/logs"
 rsync -a --exclude broadcast --exclude cache --exclude out "$ROOT/" "$WORK/repo/"
 cd "$WORK/repo"
@@ -72,7 +73,6 @@ case "$BASE_RPC_URL" in http://127.0.0.1:*) ;; *) fail "refusing a non-local RPC
 
 DEPLOYER=${DEPLOYER:-$(account deployer)}
 RECEIVER=$(account receiver)
-PROPOSER=$(account proposer)
 USER=$(account user)
 export DEPLOYER
 NONCE=$(cast nonce "$DEPLOYER" --rpc-url "$LOCAL")
@@ -85,14 +85,12 @@ python3 scripts/verify_base.py --rpc "$LOCAL" --reads-only --account "$DEPLOYER"
 
 step "Deploy (predicted vault $PREDICTED_VAULT)"
 fund "$DEPLOYER" $((SEED_USD * 2 * 1000000))
-METHODOLOGY_URI=$(python3 scripts/ipfs_cid.py docs/METHODOLOGY.md)
-export METHODOLOGY_URI
 forge_script script/Deploy.s.sol:Deploy "$DEPLOYER"
 read -r VALUATION CONTROLLER VAULT GATEWAY LENS < <(python3 - <<'EOF'
 import json
 d = json.load(open('broadcast/Deploy.s.sol/8453/run-latest.json'))
 a = {t['contractName']: t['contractAddress'] for t in d['transactions'] if t.get('transactionType') == 'CREATE'}
-print(a['Valuation'], a['IndexController'], a['M7CapVault'], a['USDCGateway'], a['M7CapLens'])
+print(a['Valuation'], a['IndexController'], a['M7Vault'], a['USDCGateway'], a['M7Lens'])
 EOF
 )
 export VAULT CONTROLLER GATEWAY
@@ -102,23 +100,8 @@ python3 scripts/verify_deployment.py --rpc "$LOCAL" \
   --write-record "$WORK/deployment-record.json" >"$WORK/logs/verify-deployment.json" ||
   fail "verify_deployment.py (see $WORK/logs/verify-deployment.json)"
 
-step "Fixture snapshot for the current quarter (REHEARSAL ONLY, not index data)"
-QUARTER=$(cast call "$CONTROLLER" 'currentQuarter()(uint32)' --rpc-url "$LOCAL")
-python3 - "$QUARTER" <<'EOF'
-import hashlib, json, sys
-quantities = [19, 12, 12, 9, 20, 20, 8]  # illustrative only
-ratios = [q * 10**18 // sum(quantities) for q in quantities]
-ratios[0] += 10**18 - sum(ratios)
-digest = '0x' + hashlib.sha256(b'M7CAP rehearsal fixture: not index data').hexdigest()
-json.dump({'methodology': 'M7CAP-v1', 'quarter_id': int(sys.argv[1]), 'observation_sha256': digest,
-           'symbols': ['AAPLc', 'AMZNc', 'GOOGLc', 'METAc', 'MSFTc', 'NVDAc', 'TSLAc'],
-           'quantity_ratios': [str(r) for r in ratios], 'scale': str(10**18),
-           'note': 'REHEARSAL FIXTURE, NOT INDEX DATA'},
-          open('config/rehearsal/snapshot.json', 'w'), indent=2)
-EOF
-
 step "Size the seed, acquire it from the pinned pools and bootstrap"
-python3 scripts/seed_basket.py config/rehearsal/snapshot.json --usd "$SEED_USD" --vault "$VAULT" \
+python3 scripts/seed_basket.py --usd "$SEED_USD" --vault "$VAULT" \
   --receiver "$RECEIVER" --out config/rehearsal/seed.json --rpc "$LOCAL" --max-feed-age 604800 \
   >"$WORK/logs/seed.json" || fail "seed_basket.py (see $WORK/logs/seed.json)"
 export SEED_FILE=config/rehearsal/seed.json MAX_FEED_AGE=604800 GATEWAY
@@ -155,46 +138,48 @@ done
 [ "$(cast call "$USDC" 'balanceOf(address)(uint256)' "$GATEWAY" --rpc-url "$LOCAL" | awk '{print $1}')" = 0 ] ||
   fail "the gateway kept USDC"
 
-step "Propose the fixture, watch, travel 72 hours, settle"
-fund "$PROPOSER" 2000000000
-export PROPOSER SNAPSHOT_FILE=config/rehearsal/snapshot.json EVIDENCE_URI=ipfs://m7cap-rehearsal-fixture
-forge_script script/Maintain.s.sol:Propose "$PROPOSER"
-ASSERTION_ID=$(cast call "$CONTROLLER" 'latestProposal(uint32)(bytes32)' "$QUARTER" --rpc-url "$LOCAL")
-export ASSERTION_ID EXECUTOR=$USER
-python3 scripts/watch_index.py --controller "$CONTROLLER" --rpc "$LOCAL" \
-  --expected-snapshot config/rehearsal/snapshot.json >"$WORK/logs/watch-pending.json" || true
-grep -q 'Challenge window is open' "$WORK/logs/watch-pending.json" || fail "watcher did not see the open challenge"
+step "Reset status and monitoring"
+[ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = true ] ||
+  fail "a fresh deployment should have this quarter's reset due"
 python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
-  --expected-snapshot config/rehearsal/snapshot.json --state-file "$WORK/monitor-state.json" \
-  >"$WORK/logs/monitor-pending.json" || true
-monitor_ok "$WORK/logs/monitor-pending.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor-pending.json)"
-cast rpc --rpc-url "$LOCAL" evm_increaseTime 259201 >/dev/null
-cast rpc --rpc-url "$LOCAL" evm_mine >/dev/null
-forge_script script/Maintain.s.sol:Settle "$USER"
-[ "$(cast call "$CONTROLLER" 'acceptedProposal(uint32)(bytes32)' "$QUARTER" --rpc-url "$LOCAL")" = "$ASSERTION_ID" ] ||
-  fail "the fixture proposal was not accepted"
-python3 scripts/watch_index.py --controller "$CONTROLLER" --rpc "$LOCAL" \
-  --expected-snapshot config/rehearsal/snapshot.json >"$WORK/logs/watch-accepted.json" || true
-grep -q 'awaits permissionless execution' "$WORK/logs/watch-accepted.json" || fail "watcher missed the acceptance"
-python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
-  --expected-snapshot config/rehearsal/snapshot.json --state-file "$WORK/monitor-state.json" \
-  >"$WORK/logs/monitor-accepted.json" || true
-monitor_ok "$WORK/logs/monitor-accepted.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor-accepted.json)"
-grep -q 'awaits permissionless execution' "$WORK/logs/monitor-accepted.json" || fail "monitor did not report the due execution"
-grep -q '"price_per_share_usd"' "$WORK/logs/monitor-accepted.json" || fail "monitor did not report the price per share"
+  --state-file "$WORK/monitor-state.json" >"$WORK/logs/monitor.json" || true
+monitor_ok "$WORK/logs/monitor.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor.json)"
+grep -q "equal-weight reset" "$WORK/logs/monitor.json" || fail "monitor did not report the due reset"
+grep -q '"price_per_share_usd"' "$WORK/logs/monitor.json" || fail "monitor did not report the price per share"
+
+step "First reset, with the runbook's Maintain.s.sol:Rebalance"
+# Inside the execution window (a weekday, 15:00-20:00 UTC, with fresh prices) the reset runs on the fork. Outside it,
+# the valuation's gates must refuse it and leave this quarter's reset due.
+LOG="$WORK/logs/rebalance.log"
+if EXECUTOR=$USER "$BIN/forge" script script/Maintain.s.sol:Rebalance --rpc-url "$LOCAL" --unlocked --sender "$USER" \
+  --broadcast --gas-estimate-multiplier 200 >"$LOG" 2>&1; then
+  [ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = false ] || fail "the reset ran but is still due"
+  python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
+    --state-file "$WORK/monitor-state.json" >"$WORK/logs/monitor-after-reset.json" || true
+  monitor_ok "$WORK/logs/monitor-after-reset.json" ||
+    fail "monitor.py alert or read failure after the reset (see $WORK/logs/monitor-after-reset.json)"
+  ! grep -q "equal-weight reset" "$WORK/logs/monitor-after-reset.json" || fail "the monitor still reports the reset as due"
+  RESET="ran on the fork"
+else
+  GATE=$(grep -o -E 'OutsideExecutionWindow|NoFreshMarketSignal|UnavailablePrice\([0-9]+\)|SequencerUnavailable' "$LOG" |
+    head -1 || true)
+  [ -n "$GATE" ] || { tail -40 "$LOG"; fail "Maintain.s.sol:Rebalance (see $LOG)"; }
+  [ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = true ] || fail "a refused reset changed state"
+  RESET="refused by the valuation's gates ($GATE); rehearse in the execution window to run it"
+fi
 
 step "Rehearsal passed"
 cat <<EOF
 Upgrade rules:   $UPGRADE
 Valuation:       $VALUATION
 IndexController: $CONTROLLER
-M7CapVault:      $VAULT
+M7Vault:         $VAULT
 USDCGateway:     $GATEWAY
-M7CapLens:       $LENS
+M7Lens:          $LENS
 Price per share: $(python3 -c "print('%.6f' % ($PRICE / 1e18))") USD
 Total value:     $(python3 -c "print('%.2f' % ($TOTAL / 1e18))") USD
 Record:          $WORK/deployment-record.json
+First reset:     $RESET
 Logs:            $WORK/logs
-Execution is not rehearsed here: after 72 hours of time travel the fork's feeds are stale. BaseForkTest
-covers a live-pool execution with feeds reported fresh.
+BaseForkTest runs a trading reset through the live pools, with feeds reported fresh.
 EOF

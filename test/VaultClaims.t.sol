@@ -4,15 +4,15 @@ pragma solidity 0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {Swap} from "../src/Types.sol";
-import {VaultTestToken, VaultTestRouter} from "./M7CapVault.t.sol";
+import {VaultTestToken, VaultTestRouter} from "./M7Vault.t.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {ControllerStub, VaultHarness} from "./mocks/VaultHarness.sol";
 
 /// @dev D-01 and N-05: a leg that cannot move becomes the redeemer's claim instead of blocking the whole exit.
 contract VaultClaimsTest is VaultHarness {
-    M7CapVault vault;
+    M7Vault vault;
     ControllerStub stub;
     IERC20[8] tokens;
     VaultTestRouter router;
@@ -92,9 +92,37 @@ contract VaultClaimsTest is VaultHarness {
         _token(6).setFrozen(false);
         Swap[] memory sell = new Swap[](1);
         sell[0] = Swap({tokenIn: 6, tokenOut: 7, amountIn: vault.backing(6) + 1, minAmountOut: 1});
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.ExceedsBacking.selector, 6));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.ExceedsBacking.selector, 6));
         stub.rebalance(sell, block.timestamp);
         assertEq(tokens[6].balanceOf(address(vault)) - vault.backing(6), deferred[6]);
+    }
+
+    function testRewardIsControllerOnlyUsdcAndNeverFromClaims() public {
+        vm.expectRevert(M7Vault.Unauthorized.selector);
+        vault.payReward(bob, 1e6);
+        // A frozen USDC leg defers part of the cash as a claim; the reward can only use the cash that remains.
+        _token(7).setFrozen(true);
+        (, uint256[8] memory deferred) = vault.redeemBasketWithClaims(500e18, noMinimum, bob, block.timestamp);
+        _token(7).setFrozen(false);
+        uint256 free = vault.backing(7);
+        assertEq(free, 50e6 - deferred[7]);
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.ExceedsBacking.selector, 7));
+        stub.payReward(carol, free + 1);
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.ExceedsBacking.selector, 7));
+        stub.payReward(carol, 0);
+        address[3] memory invalid = [address(0), address(vault), vault.SEED_LOCK()];
+        for (uint256 k; k < 3; ++k) {
+            vm.expectRevert(M7Vault.InvalidReceiver.selector);
+            stub.payReward(invalid[k], 1);
+        }
+        vm.expectEmit(address(vault));
+        emit M7Vault.RewardPaid(carol, free);
+        stub.payReward(carol, free);
+        assertEq(tokens[7].balanceOf(carol), free);
+        assertEq(vault.backing(7), 0);
+        assertEq(vault.reserved(7), deferred[7]); // the redeemer's claim is intact and still withdrawable
+        vault.withdrawClaim(7, deferred[7], bob);
+        assertEq(vault.reserved(7), 0);
     }
 
     function testPartialWithdrawalAndInvalidRequests() public {
@@ -104,18 +132,18 @@ contract VaultClaimsTest is VaultHarness {
         vm.expectRevert("frozen"); // still frozen: the claim stays intact
         vault.withdrawClaim(3, owed, carol);
         _token(3).setFrozen(false);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientClaim.selector, 3));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientClaim.selector, 3));
         vault.withdrawClaim(3, owed + 1, carol);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientClaim.selector, 3));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientClaim.selector, 3));
         vault.withdrawClaim(3, 0, carol);
-        vm.expectRevert(M7CapVault.InvalidReceiver.selector);
+        vm.expectRevert(M7Vault.InvalidReceiver.selector);
         vault.withdrawClaim(3, owed, address(vault));
-        vm.expectRevert(M7CapVault.InvalidReceiver.selector);
+        vm.expectRevert(M7Vault.InvalidReceiver.selector);
         vault.withdrawClaim(3, owed, address(1));
-        vm.expectRevert(M7CapVault.InvalidIndex.selector);
+        vm.expectRevert(M7Vault.InvalidIndex.selector);
         vault.withdrawClaim(8, owed, carol);
         vm.prank(bob); // claims belong to the redeemer, not the receiver
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientClaim.selector, 3));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientClaim.selector, 3));
         vault.withdrawClaim(3, 1, bob);
         uint256 bobBefore = tokens[3].balanceOf(bob);
         vault.withdrawClaim(3, owed / 2, carol);
@@ -132,7 +160,7 @@ contract VaultClaimsTest is VaultHarness {
         uint256 held = tokens[5].balanceOf(address(vault));
         _token(5).seize(address(vault), held - deferred[5] / 2); // the issuer seizes past the reserve
         assertEq(vault.backing(5), 0);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.MissingComponent.selector, 5));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.MissingComponent.selector, 5));
         vault.quoteMint(1e18);
         assertEq(vault.quoteRedeem(10e18)[5], 0);
         vm.expectRevert(
@@ -147,7 +175,7 @@ contract VaultClaimsTest is VaultHarness {
 
     function testShortTransferStillRevertsInsteadOfDeferring() public {
         _token(2).setTaxed(true);
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.TransferMismatch.selector, 2));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.TransferMismatch.selector, 2));
         vault.redeemBasketWithClaims(100e18, noMinimum, bob, block.timestamp);
         assertEq(vault.reserved(2), 0);
     }
@@ -155,14 +183,14 @@ contract VaultClaimsTest is VaultHarness {
     function testResilientRedemptionRespectsMinimumsDeadlineAndReceiver() public {
         uint256[8] memory entitled = vault.quoteRedeem(10e18);
         entitled[4] += 1;
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.OutputLimit.selector, 4));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.OutputLimit.selector, 4));
         vault.redeemBasketWithClaims(10e18, entitled, bob, block.timestamp);
-        vm.expectRevert(M7CapVault.Expired.selector);
+        vm.expectRevert(M7Vault.Expired.selector);
         vault.redeemBasketWithClaims(10e18, noMinimum, bob, block.timestamp - 1);
-        vm.expectRevert(M7CapVault.InvalidReceiver.selector);
+        vm.expectRevert(M7Vault.InvalidReceiver.selector);
         vault.redeemBasketWithClaims(10e18, noMinimum, address(vault), block.timestamp);
         uint256 supply = vault.totalSupply();
-        vm.expectRevert(M7CapVault.InvalidAmount.selector);
+        vm.expectRevert(M7Vault.InvalidAmount.selector);
         vault.redeemBasketWithClaims(supply, noMinimum, bob, block.timestamp);
     }
 }

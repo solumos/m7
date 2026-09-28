@@ -3,13 +3,13 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {M7CapVault} from "../../src/M7CapVault.sol";
-import {IM7CapVault} from "../../src/interfaces/IM7CapVault.sol";
+import {M7Vault} from "../../src/M7Vault.sol";
+import {IM7Vault} from "../../src/interfaces/IM7Vault.sol";
 import {IControllerBinding, IPolicyRegistry} from "../../src/interfaces/IB20Policy.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../../src/interfaces/ISlipstreamRouter.sol";
 import {Swap} from "../../src/Types.sol";
 
-/// @dev Stands in for a controller bound to a predicted vault address and forwards rebalances in unit tests.
+/// @dev Stands in for a controller bound to a predicted vault address and forwards its calls in unit tests.
 contract ControllerStub is IControllerBinding {
     address public immutable vault;
 
@@ -18,7 +18,11 @@ contract ControllerStub is IControllerBinding {
     }
 
     function rebalance(Swap[] calldata swaps, uint256 deadline) external {
-        IM7CapVault(vault).rebalance(swaps, deadline);
+        IM7Vault(vault).rebalance(swaps, deadline);
+    }
+
+    function payReward(address to, uint256 amount) external {
+        IM7Vault(vault).payReward(to, amount);
     }
 }
 
@@ -36,10 +40,10 @@ abstract contract VaultHarness is Test {
         ISlipstreamRouter router,
         ISlipstreamFactory factory,
         IPolicyRegistry registry
-    ) internal returns (M7CapVault vault, ControllerStub stub) {
+    ) internal returns (M7Vault vault, ControllerStub stub) {
         address predicted = vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
         stub = new ControllerStub(predicted);
-        vault = new M7CapVault(assets, spacings, address(stub), router, factory, registry, address(this));
+        vault = new M7Vault(assets, spacings, address(stub), router, factory, registry, address(this));
         require(address(vault) == predicted, "vault address prediction");
     }
 }

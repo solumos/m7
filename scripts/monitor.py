@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Scheduled M7CAP monitor for an always-on server. Read-only: no keys, signatures, or transactions.
+"""Scheduled M7 monitor for an always-on server. Read-only: no keys, signatures, or transactions.
 
-Each run (every 15 minutes from ops/m7cap-monitor.timer) reads the controller's proposal state with
-watch_index.py, records the price per share from M7CapLens, checks the vault's assets, and, at most hourly, runs
-the verify_base.py read checks with the vault and gateway as policy accounts. New or changed alerts at or above NOTIFY_LEVEL go to ALERT_WEBHOOK_URL (Slack or Discord JSON). Open
-critical alerts repeat every six hours and cleared ones are announced. HEARTBEAT_URL is pinged after every run
+Each run (every 15 minutes from ops/m7-monitor.timer) checks whether this quarter's equal-weight reset has
+run, records the price per share and weights from M7Lens, checks the vault's assets, and, at most hourly, runs
+the verify_base.py read checks with the vault and gateway as policy accounts. New or changed alerts at or above
+NOTIFY_LEVEL go to ALERT_WEBHOOK_URL (Slack or Discord JSON). Open critical alerts repeat every six hours and
+cleared ones are announced. HEARTBEAT_URL is pinged after every run
 that read the chain and delivered its alerts, so a heartbeat service notices a dead monitor, server or RPC.
 """
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -16,14 +18,50 @@ import sys
 import time
 import urllib.request
 
-from index_snapshot import SYMBOLS
-from verify_base import RPC, address, verify
-from watch_index import LEVELS, monitor
+from verify_base import RPC, SYMBOLS, address, verify
 
 ROOT = Path(__file__).resolve().parents[1]
 REPEAT_CRITICAL_SECONDS = 6 * 3600
 PREFLIGHT_INTERVAL_SECONDS = 3600
+# critical: a human must look now; action: an operator step is due; info: an expected state.
+LEVELS = ('info', 'action', 'critical')
+LATE_DAYS = 7
+DEADLINE_DAYS = 21
 WAD = 10**18
+
+
+def quarter_start(quarter):
+    """UTC timestamp at which calendar quarter `quarter` (year * 4 + zero-based quarter) begins."""
+    year, index = divmod(quarter, 4)
+    return int(datetime(year, index * 3 + 1, 1, tzinfo=timezone.utc).timestamp())
+
+
+def quarter_end(quarter):
+    return quarter_start(quarter + 1)
+
+
+def reset_status(rpc, controller, now):
+    """Alerts on this quarter's equal-weight reset: due, late, or close to the quarter's end."""
+    quarter = rpc.call(controller, 'currentQuarter()')[0]
+    done = rpc.call(controller, 'executedQuarter(uint32)', quarter)[0] == 1
+    report = {'quarter': quarter, 'reset_done': done,
+              'last_reset_quarter': rpc.call(controller, 'lastExecutedQuarter()')[0],
+              'quarter_ends_at': datetime.fromtimestamp(quarter_end(quarter), timezone.utc).isoformat()}
+    alerts = []
+    if not done:
+        days_in = (now - quarter_start(quarter)) // 86400
+        days_left = (quarter_end(quarter) - now) // 86400
+        if days_left <= DEADLINE_DAYS:
+            # The message stays the same all quarter, so the alert repeats instead of resolving daily.
+            ends = datetime.fromtimestamp(quarter_end(quarter), timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+            alerts.append({'level': 'critical', 'message': 'The quarter ends at %s and its equal-weight reset '
+                           'has not run.' % ends})
+        elif days_in >= LATE_DAYS:
+            alerts.append({'level': 'action', 'message': "This quarter's equal-weight reset has not run; anyone can "
+                           'trigger it on a weekday between 15:00 and 20:00 UTC.'})
+        else:
+            alerts.append({'level': 'info', 'message': "This quarter's equal-weight reset is due."})
+    return alerts, report
 
 
 def alert_key(alert):
@@ -43,22 +81,27 @@ def plan_notifications(alerts, state, now, notify_level='action'):
         due = entry['last_sent'] is None or (
             alert['level'] == 'critical' and now - entry['last_sent'] >= REPEAT_CRITICAL_SECONDS)
         if LEVELS.index(alert['level']) >= floor and due:
-            messages.append('[M7CAP %s] %s' % (alert['level'].upper(), alert['message']))
+            messages.append('[M7 %s] %s' % (alert['level'].upper(), alert['message']))
             entry = dict(entry, last_sent=now)
         current[key] = entry
     for key, entry in previous.items():
         if key not in current and entry.get('last_sent') is not None:
-            messages.append('[M7CAP RESOLVED] ' + entry['message'])
+            messages.append('[M7 RESOLVED] ' + entry['message'])
     return messages, dict(state, open=current)
 
 
 def decode_value(words):
-    """M7CapLens.value(): a static tuple of perShare, nav, supply, components[8], oldestPriceAt and two flags."""
+    """M7Lens.value(): a static tuple of perShare, nav, supply, components[8], oldestPriceAt and two flags."""
     if len(words) != 14 or words[12] not in (0, 1) or words[13] not in (0, 1):
-        raise ValueError('Malformed M7CapLens value')
+        raise ValueError('Malformed M7Lens value')
+    components = words[3:11]
+    stocks = sum(components[:7])
+    weights = [c / stocks if stocks else 0 for c in components[:7]]
     return {'price_per_share_usd': '%.6f' % (words[0] / WAD), 'nav_usd': '%.2f' % (words[1] / WAD),
             'supply': '%.6f' % (words[2] / WAD), 'oldest_price_at': words[11],
-            'issuer_paused': bool(words[12]), 'sequencer_down': bool(words[13])}
+            'issuer_paused': bool(words[12]), 'sequencer_down': bool(words[13]),
+            'weights': {s: '%.4f' % w for s, w in zip(SYMBOLS, weights)},
+            'largest_weight_gap': '%.4f' % max(abs(w - 1 / 7) for w in weights)}
 
 
 def vault_state(rpc, controller, vault, lens, state):
@@ -95,7 +138,7 @@ def vault_state(rpc, controller, vault, lens, state):
 def request(url, payload=None):
     data = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json',
-                                                           'User-Agent': 'm7cap-monitor/0.1'})
+                                                           'User-Agent': 'm7-monitor/0.1'})
     with urllib.request.urlopen(req, timeout=30) as response:
         response.read()
 
@@ -105,15 +148,15 @@ def collect(args, state, now):
     alerts, readable, report = [], True, {}
     try:
         rpc = RPC(args.rpc)
-        expected = json.loads(Path(args.expected_snapshot).read_text()) if args.expected_snapshot else None
-        alerts += monitor(args.controller, rpc, expected)['alert_levels']
+        reset_alerts, reset = reset_status(rpc, args.controller, now)
+        alerts += reset_alerts
         vault = args.vault or address(rpc.call(args.controller, 'vault()')[0])
         state_alerts, report = vault_state(rpc, args.controller, vault, args.lens, state)
         alerts += state_alerts
-        report.update(block=int(rpc.block['number'], 16))
+        report.update(reset, block=int(rpc.block['number'], 16))
     except Exception as exc:
         readable, vault = False, args.vault
-        alerts.append({'level': 'critical', 'message': 'Watcher could not read the controller: %s' % exc})
+        alerts.append({'level': 'critical', 'message': 'The monitor could not read the chain: %s' % exc})
     if now - state.get('last_preflight', 0) >= PREFLIGHT_INTERVAL_SECONDS:
         accounts = [a for a in (vault, args.gateway) if a]
         try:
@@ -134,16 +177,14 @@ def main():
     p.add_argument('--controller', default=env('CONTROLLER'))
     p.add_argument('--vault', default=env('VAULT'), help='Defaults to controller.vault()')
     p.add_argument('--gateway', default=env('GATEWAY'))
-    p.add_argument('--lens', default=env('LENS'), help='M7CapLens, for the price per share')
+    p.add_argument('--lens', default=env('LENS'), help='M7Lens, for the price per share')
     p.add_argument('--rpc', default=env('BASE_RPC_URL'))
-    p.add_argument('--expected-snapshot', default=env('EXPECTED_SNAPSHOT'),
-                   help='The reviewed index_snapshot.py output for the current quarter')
     p.add_argument('--manifest', default=str(ROOT / 'config/base.json'))
     p.add_argument('--webhook', default=env('ALERT_WEBHOOK_URL'))
     p.add_argument('--heartbeat', default=env('HEARTBEAT_URL'))
     p.add_argument('--notify-level', choices=LEVELS, default=env('NOTIFY_LEVEL', 'action'))
     p.add_argument('--state-file', default=env('STATE_FILE') or str(
-        Path(state_dir) / 'state.json' if state_dir else Path.home() / '.m7cap-monitor/state.json'))
+        Path(state_dir) / 'state.json' if state_dir else Path.home() / '.m7-monitor/state.json'))
     p.add_argument('--history-file', default=env('HISTORY_FILE'),
                    help='Appends one JSON line of price per share per run; defaults beside the state file')
     args = p.parse_args()

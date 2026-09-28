@@ -4,38 +4,38 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3} from "../src/Valuation.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
-import {
-    ControllerToken,
-    ControllerFeed,
-    ControllerRegistry,
-    ControllerOracle
-} from "./mocks/ControllerMocks.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
+import {ControllerToken, ControllerFeed, ControllerRegistry} from "./mocks/ControllerMocks.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {PricedVenue} from "./mocks/RouterMocks.sol";
 
-/// @dev The on-chain planner at realistic scale: about $1M NAV, seven differently priced stocks, the real vault and
-///      controller, and a venue whose prices can deviate from the oracle and keep a haircut.
+/// @dev The equal-weight reset at realistic prices with the real vault and controller, against a venue whose prices
+///      can deviate from the oracle and keep a haircut. The default vault holds $1M in equal value.
 contract ControllerPlannerTest is Test {
     uint256 constant WAD = 1e18;
-    uint32 constant QUARTER = 2026 * 4 + 3;
+    uint256 constant THURSDAY = 1790870400; // Oct 1 2026 16:00 UTC
+    address constant KEEPER = address(0xBEEF);
     uint256[7] PRICES = [uint256(340), 250, 343, 749, 518, 225, 372];
-    uint256[7] WEIGHT_BPS = [uint256(1900), 1200, 1200, 900, 2000, 2000, 800];
 
-    M7CapVault vault;
+    M7Vault vault;
     IndexController controller;
     Valuation valuation;
-    ControllerOracle oracle;
     PricedVenue venue;
     IERC20[8] assets;
     ControllerFeed[8] feeds;
     uint256[7] seed;
+    uint256[7] prices; // dollars with four extra decimals
 
     function setUp() public {
-        vm.warp(1790870400); // Thursday Oct 1 2026 16:00 UTC
+        _deploy(1_000_000);
+    }
+
+    /// A fresh system holding `navUsd` in equal value at PRICES.
+    function _deploy(uint256 navUsd) private {
+        vm.warp(THURSDAY);
         address[8] memory addresses;
         IAggregatorV3[8] memory aggregators;
         int24[7] memory spacings;
@@ -48,45 +48,47 @@ contract ControllerPlannerTest is Test {
         valuation = new Valuation(
             addresses, aggregators, new ControllerFeed(0, 0), new ControllerRegistry(), 25 hours
         );
-        oracle = new ControllerOracle();
         venue = new PricedVenue(addresses[7]);
         uint256[8] memory amounts;
         for (uint256 i; i < 7; ++i) {
+            prices[i] = PRICES[i] * 1e4;
             spacings[i] = 10;
             venue.setPool(addresses[i], addresses[7], 10, true);
             venue.setRate(addresses[i], PRICES[i] * 1e16); // raw USDC per raw stock, 1e18-scaled
-            seed[i] = 1_000_000e8 * WEIGHT_BPS[i] / 10_000 / PRICES[i];
+            seed[i] = navUsd * 1e8 / 7 / PRICES[i];
             amounts[i] = seed[i];
         }
+        // Every contract created before the vault shifts its CREATE address, so create the registry first.
         PolicyRegistryMock registry = new PolicyRegistryMock();
         address predictedVault =
             vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
-        controller = new IndexController(
-            IM7CapVault(predictedVault),
-            oracle,
-            assets[7],
-            1000e6,
-            keccak256("methodology"),
-            "ipfs://m",
-            valuation
-        );
-        vault = new M7CapVault(assets, spacings, address(controller), venue, venue, registry, address(this));
+        controller = new IndexController(IM7Vault(predictedVault), valuation);
+        vault = new M7Vault(assets, spacings, address(controller), venue, venue, registry, address(this));
         for (uint256 i; i < 8; ++i) {
             ControllerToken(addresses[i]).mint(address(this), 1e20);
             ControllerToken(addresses[i]).mint(address(venue), 1e20);
             assets[i].approve(address(vault), type(uint256).max);
         }
-        assets[7].approve(address(controller), type(uint256).max);
         vault.bootstrap(amounts, address(this));
     }
 
-    function _accept(uint256[7] memory ratios) private {
-        bytes32 id = controller.propose(QUARTER, ratios, "ipfs://evidence", keccak256("observations"));
-        vm.warp(1791216000); // Monday Oct 5 16:00 UTC
-        for (uint256 i; i < 8; ++i) {
-            feeds[i].set(i == 7 ? int256(1e8) : int256(PRICES[i] * 1e8), block.timestamp);
+    /// Moves stock `i` by `bps` in both the oracle and the venue.
+    function _move(uint256 i, int256 bps) private {
+        prices[i] = uint256(int256(PRICES[i]) * (10_000 + bps)) * 1e4 / 10_000; // 4 extra decimals
+        feeds[i].set(int256(prices[i] * 1e4), block.timestamp);
+        venue.setRate(address(assets[i]), prices[i] * 1e12);
+    }
+
+    /// A typical quarter's price moves.
+    function _quarterOfMoves() private {
+        int256[7] memory bps = [int256(500), -300, 200, -400, 100, 600, -200];
+        for (uint256 i; i < 7; ++i) {
+            _move(i, bps[i]);
         }
-        assertTrue(controller.settle(id));
+    }
+
+    function _rebalance() private {
+        controller.rebalance(block.timestamp, KEEPER);
     }
 
     function _held() private view returns (uint256[8] memory held) {
@@ -95,31 +97,15 @@ contract ControllerPlannerTest is Test {
         }
     }
 
-    function _shares(uint256[8] memory held) private pure returns (uint256[7] memory shares) {
-        uint256 total;
-        for (uint256 i; i < 7; ++i) {
-            total += held[i];
-        }
-        for (uint256 i; i < 7; ++i) {
-            shares[i] = held[i] * WAD / total;
-        }
+    function _values() private view returns (uint256[8] memory components, uint256 nav) {
+        return valuation.values(_held(), valuation.snapshot());
     }
 
-    function _normalize(uint256[7] memory quantities) private pure returns (uint256[7] memory ratios) {
-        uint256 total;
-        for (uint256 i; i < 7; ++i) {
-            total += quantities[i];
+    function _assertEqualWeights(uint256 toleranceWad) private view {
+        (uint256[8] memory components,) = _values();
+        for (uint256 i = 1; i < 7; ++i) {
+            assertApproxEqRel(components[i], components[0], toleranceWad, "not equal weight");
         }
-        uint256 assigned;
-        for (uint256 i; i < 6; ++i) {
-            ratios[i] = quantities[i] * WAD / total;
-            assigned += ratios[i];
-        }
-        ratios[6] = WAD - assigned;
-    }
-
-    function _nav(uint256[8] memory held) private view returns (uint256 nav) {
-        (, nav) = valuation.values(held, valuation.snapshot());
     }
 
     /// Oracle value (1e18 USD) of every leg's input, from the venue's call log.
@@ -130,22 +116,15 @@ contract ControllerPlannerTest is Test {
                 traded += call.amountIn * 1e12;
             } else {
                 for (uint256 i; i < 7; ++i) {
-                    if (call.tokenIn == address(assets[i])) traded += call.amountIn * PRICES[i] * 1e10;
+                    if (call.tokenIn == address(assets[i])) traded += call.amountIn * prices[i] * 1e6;
                 }
             }
         }
     }
 
     function testSellsPrecedeBuysEachStockOnceThroughPinnedPools() public {
-        uint256[7] memory drift = [uint256(10_300), 10_000, 9_900, 10_150, 9_800, 10_100, 10_000];
-        uint256[7] memory quantities;
-        for (uint256 i; i < 7; ++i) {
-            quantities[i] = seed[i] * drift[i] / 10_000;
-        }
-        uint256[7] memory ratios = _normalize(quantities);
-        _accept(ratios);
-        controller.execute(block.timestamp);
-
+        _quarterOfMoves();
+        _rebalance();
         bool buying;
         uint256 seen;
         for (uint256 k; k < venue.callCount(); ++k) {
@@ -163,91 +142,87 @@ contract ControllerPlannerTest is Test {
             }
         }
         assertTrue(buying);
-        uint256[7] memory shares = _shares(_held());
-        for (uint256 i; i < 7; ++i) {
-            // All drifts are inside one step, so the accepted ratios are reached within 30 bp.
-            assertApproxEqRel(shares[i], ratios[i], 0.003e18);
-        }
+        _assertEqualWeights(0.003e18);
+        // 0.5 bp of $1M is $50: the reward is capped at $25.
+        assertEq(assets[7].balanceOf(KEEPER), 25e6);
     }
 
-    function testFuzzPlannerStaysWithinStepLossAndCashBounds(uint256 entropy) public {
-        uint256[7] memory quantities;
+    function testFuzzResetStaysWithinLossComplianceAndCashBounds(uint256 entropy) public {
         for (uint256 i; i < 7; ++i) {
-            uint256 drift = 9_200 + uint256(keccak256(abi.encode(entropy, "drift", i))) % 1_601; // +-8%
-            quantities[i] = seed[i] * drift / 10_000;
-            uint256 deviation = 9_960 + uint256(keccak256(abi.encode(entropy, "pool", i))) % 81; // +-0.4%
-            venue.setRate(address(assets[i]), PRICES[i] * 1e16 * deviation / 10_000);
+            // Quarterly moves of +-20%, and pools within +-0.4% of the oracle.
+            _move(i, int256(uint256(keccak256(abi.encode(entropy, "move", i))) % 4_001) - 2_000);
+            uint256 deviation = 9_960 + uint256(keccak256(abi.encode(entropy, "pool", i))) % 81;
+            venue.setRate(address(assets[i]), prices[i] * 1e12 * deviation / 10_000);
         }
         venue.setHaircuts(
             uint256(keccak256(abi.encode(entropy, "sell"))) % 31,
             uint256(keccak256(abi.encode(entropy, "buy"))) % 31
         );
-        _accept(_normalize(quantities));
-        uint256[8] memory before = _held();
-        uint256 navBefore = _nav(before);
-        uint256[7] memory sharesBefore = _shares(before);
-
-        controller.execute(block.timestamp);
-
-        uint256[8] memory held = _held();
-        uint256[7] memory shares = _shares(held);
-        for (uint256 i; i < 7; ++i) {
-            uint256 moved =
-                shares[i] > sharesBefore[i] ? shares[i] - sharesBefore[i] : sharesBefore[i] - shares[i];
-            uint256 bound = Math.max(sharesBefore[i] * 5 / 100, 0.0025e18);
-            assertLe(moved, bound + sharesBefore[i] / 1_000, "a constituent moved more than one step");
-        }
-        uint256 navAfter = _nav(held);
+        (, uint256 navBefore) = _values();
+        _rebalance();
+        (, uint256 navAfter) = _values();
+        uint256 reward = assets[7].balanceOf(KEEPER) * 1e12;
         assertLe(
-            navBefore - Math.min(navBefore, navAfter), _traded() / 100 + 1e15, "loss beyond 1% of traded"
+            navBefore - Math.min(navBefore, navAfter),
+            _traded() / 100 + reward + 1e15,
+            "loss beyond 1% plus reward"
         );
-        assertLe(held[7] * 1e12, Math.max(navAfter / 10_000, 0.1e18), "undeployed cash");
+        _assertEqualWeights(0.004e18); // compliance is 30 bp of quantity; pool deviation adds a little value noise
+        (uint256[8] memory components,) = _values();
+        assertLe(components[7], navAfter / 10_000 + 0.07e18, "undeployed cash");
     }
 
     function testLossyVenueRevertsAtomically() public {
-        uint256[7] memory quantities = seed;
-        quantities[0] = quantities[0] * 103 / 100;
-        _accept(_normalize(quantities));
+        _quarterOfMoves();
         venue.setHaircuts(0, 150); // purchases return 1.5% less than the oracle implies
         uint256[8] memory before = _held();
         vm.expectRevert("Too little received");
-        controller.execute(block.timestamp);
+        _rebalance();
         uint256[8] memory held = _held();
         for (uint256 i; i < 8; ++i) {
             assertEq(held[i], before[i]);
         }
-        assertFalse(controller.executedQuarter(QUARTER));
+        assertTrue(controller.rebalanceDue());
+        assertEq(assets[7].balanceOf(KEEPER), 0);
     }
 
     function testStockBelowPrecisionFloorIsRestoredAndIssuanceResumes() public {
-        uint256[7] memory ratios = _normalize(seed);
         ControllerToken(address(assets[3])).burn(address(vault), seed[3] - 0.5e6); // seized below the floor
-        vm.expectRevert(abi.encodeWithSelector(M7CapVault.InsufficientLockedBacking.selector, 3));
+        vm.expectRevert(abi.encodeWithSelector(M7Vault.InsufficientLockedBacking.selector, 3));
         vault.quoteMint(1e18);
-        _accept(ratios);
-        controller.execute(block.timestamp);
-        uint256[7] memory shares = _shares(_held());
-        assertApproxEqRel(shares[3], 0.0025e18, 0.01e18); // one minimum step back toward its ratio
+        _rebalance();
+        uint256 total;
+        uint256[8] memory held = _held();
+        for (uint256 i; i < 7; ++i) {
+            total += held[i];
+        }
+        assertApproxEqRel(held[3] * WAD / total, 0.0025e18, 0.01e18); // one minimum step back
         vault.quoteMint(1e18); // issuance is available again
     }
 
     function testCashBelowItsCapStaysAndLargerCashIsDeployed() public {
-        _accept(_normalize(seed));
-        require(assets[7].transfer(address(vault), 50e6)); // $50 is under 1 bp of about $1M
-        controller.execute(block.timestamp);
+        require(assets[7].transfer(address(vault), 50e6)); // $50 is under 1 bp of $1M
+        _rebalance();
         assertEq(venue.callCount(), 0);
         assertEq(assets[7].balanceOf(address(vault)), 50e6);
+        assertEq(assets[7].balanceOf(KEEPER), 0); // nothing traded, nothing paid
     }
 
-    function testLargeCashDonationIsDeployedProportionally() public {
-        _accept(_normalize(seed));
+    function testLargeCashDonationIsDeployedEqually() public {
         require(assets[7].transfer(address(vault), 5_000e6));
-        controller.execute(block.timestamp);
-        assertLe(assets[7].balanceOf(address(vault)), controller.MIN_LEG_USDC());
-        uint256[7] memory shares = _shares(_held());
-        uint256[7] memory ratios = _normalize(seed);
-        for (uint256 i; i < 7; ++i) {
-            assertApproxEqRel(shares[i], ratios[i], 0.003e18);
+        _rebalance();
+        assertLe(assets[7].balanceOf(address(vault)), 100e6);
+        _assertEqualWeights(0.003e18);
+    }
+
+    function testSmallVaultsResetToo() public {
+        uint256[3] memory sizes = [uint256(100), 125, 250];
+        for (uint256 s; s < 3; ++s) {
+            _deploy(sizes[s]);
+            _quarterOfMoves();
+            _rebalance();
+            _assertEqualWeights(0.004e18);
+            assertFalse(controller.rebalanceDue());
         }
     }
 }

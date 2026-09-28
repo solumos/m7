@@ -4,18 +4,13 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3} from "../src/Valuation.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
-import {
-    ControllerToken,
-    ControllerFeed,
-    ControllerRegistry,
-    ControllerOracle
-} from "./mocks/ControllerMocks.sol";
+import {ControllerToken, ControllerFeed, ControllerRegistry} from "./mocks/ControllerMocks.sol";
 
 /// @dev A funded external venue: $100 stocks with 8 decimals exchange 1:1 raw units against 6-decimal USDC.
 contract IndexIntegrationRouter is ISlipstreamRouter, ISlipstreamFactory {
@@ -48,7 +43,7 @@ contract IndexIntegrationRouter is ISlipstreamRouter, ISlipstreamFactory {
         require(!(failSecond && calls == 2), "second swap failed");
         if (reenter) {
             uint256[8] memory amounts;
-            IM7CapVault(msg.sender).mintBasket(1, amounts, address(this), block.timestamp);
+            IM7Vault(msg.sender).mintBasket(1, amounts, address(this), block.timestamp);
         }
         require(IERC20(p.tokenIn).transferFrom(msg.sender, address(this), p.amountIn));
         amountOut = calls == 2 ? p.amountIn * secondTradeOutputBps / 10000 : p.amountIn;
@@ -62,15 +57,13 @@ contract IndexIntegrationRouter is ISlipstreamRouter, ISlipstreamFactory {
 }
 
 contract IndexIntegrationTest is Test {
-    M7CapVault vault;
+    M7Vault vault;
     IndexController controller;
     Valuation valuation;
-    ControllerOracle oracle;
     IndexIntegrationRouter router;
     IERC20[8] assets;
     IAggregatorV3[8] feeds;
     ControllerFeed sequencer;
-    bytes32 assertionId;
     uint32 constant QUARTER = 2026 * 4 + 3;
 
     function setUp() public {
@@ -88,64 +81,42 @@ contract IndexIntegrationTest is Test {
         seed[1] = 90e8;
         sequencer = new ControllerFeed(0, 0);
         valuation = new Valuation(addresses, feeds, sequencer, new ControllerRegistry(), 25 hours);
-        oracle = new ControllerOracle();
         router = new IndexIntegrationRouter();
         PolicyRegistryMock registry = new PolicyRegistryMock();
         address predictedVault =
             vm.computeCreateAddress(address(this), uint256(vm.getNonce(address(this))) + 1);
-        controller = new IndexController(
-            IM7CapVault(predictedVault),
-            oracle,
-            assets[7],
-            1000e6,
-            keccak256("methodology"),
-            "ipfs://m",
-            valuation
-        );
+        controller = new IndexController(IM7Vault(predictedVault), valuation);
         int24[7] memory spacings;
         for (uint256 i; i < 7; ++i) {
             spacings[i] = 100;
         }
-        vault = new M7CapVault(assets, spacings, address(controller), router, router, registry, address(this));
+        vault = new M7Vault(assets, spacings, address(controller), router, router, registry, address(this));
         assertEq(address(vault), predictedVault);
         for (uint256 i; i < 8; ++i) {
             assets[i].approve(address(vault), type(uint256).max);
             require(assets[i].transfer(address(router), 1e12));
         }
         vault.bootstrap(seed, address(this));
-        uint256[7] memory ratios;
-        for (uint256 i; i < 7; ++i) {
-            ratios[i] = uint256(1e18) / 7;
-        }
-        ratios[6] += uint256(1e18) % 7;
-        assets[7].approve(address(controller), 1000e6);
-        assertionId = controller.propose(QUARTER, ratios, "ipfs://test-evidence", keccak256("observations"));
-        vm.warp(1791216000); // Monday Oct 5, after 72h liveness.
-        sequencer.set(0, block.timestamp);
-        for (uint256 i; i < 8; ++i) {
-            ControllerFeed(address(feeds[i])).set(i == 7 ? int256(1e8) : int256(100e8), block.timestamp);
-        }
-        controller.settle(assertionId);
     }
 
-    /// The 110/90 seed moves one bounded step toward equal quantities: stock 0 sells 4.5 tokens to stock 1.
-    function testActualControllerAndVaultExecuteBoundedStepPermissionlessly() public {
+    /// The 110/90 seed resets to equal value: stock 0 sells 10 tokens and stock 1 buys with the proceeds. Every stock
+    ///      also sells a seventh of the caller's $3.50 reward, so each ends at $9,999.50.
+    function testActualControllerAndVaultResetToEqualWeightsPermissionlessly() public {
         vm.prank(address(123));
-        controller.execute(block.timestamp);
-        assertEq(router.calls(), 2);
-        assertApproxEqAbs(assets[0].balanceOf(address(vault)), 105.5e8, 2);
-        assertApproxEqAbs(assets[1].balanceOf(address(vault)), 94.5e8, 2);
-        for (uint256 i = 2; i < 7; ++i) {
-            assertEq(assets[i].balanceOf(address(vault)), 100e8);
+        controller.rebalance(block.timestamp, address(123));
+        assertEq(router.calls(), 7); // six sales, then one purchase
+        for (uint256 i; i < 7; ++i) {
+            assertApproxEqAbs(assets[i].balanceOf(address(vault)), 99.995e8, 2);
         }
         assertEq(assets[7].balanceOf(address(vault)), 0);
+        assertEq(assets[7].balanceOf(address(123)), 3.5e6); // 0.5 bp of $70,000
         assertEq(vault.totalSupply(), 1000e18);
         assertEq(assets[0].allowance(address(vault), address(router)), 0);
         assertEq(assets[7].allowance(address(vault), address(router)), 0);
         assertTrue(controller.executedQuarter(QUARTER));
-        // Subsequent issuance uses the successfully updated actual basket.
+        // Subsequent issuance uses the updated actual basket.
         uint256[8] memory contribution = vault.quoteMint(100e18);
-        assertApproxEqAbs(contribution[0], 10.55e8, 1);
+        assertApproxEqAbs(contribution[0], 9.9995e8, 1);
         vault.mintBasket(100e18, contribution, address(456), block.timestamp);
         assertEq(vault.balanceOf(address(456)), 100e18);
     }
@@ -154,21 +125,21 @@ contract IndexIntegrationTest is Test {
         router.configure(5000, false, false); // the purchase returns half its oracle value
         uint256 routerStockBefore = assets[0].balanceOf(address(router));
         vm.expectRevert("slippage");
-        controller.execute(block.timestamp);
+        controller.rebalance(block.timestamp, address(0));
         _assertOriginalBasket();
         assertEq(assets[0].balanceOf(address(router)), routerStockBefore);
         assertEq(assets[0].allowance(address(vault), address(router)), 0);
         assertEq(assets[7].allowance(address(vault), address(router)), 0);
         assertEq(router.calls(), 0);
         router.configure(10000, false, false);
-        controller.execute(block.timestamp); // Failed attempt did not consume the quarter.
+        controller.rebalance(block.timestamp, address(0)); // Failed attempt did not consume the quarter.
         assertTrue(controller.executedQuarter(QUARTER));
     }
 
     function testSecondSwapFailureRollsBackFirstSaleAndControllerState() public {
         router.configure(10000, true, false);
         vm.expectRevert("second swap failed");
-        controller.execute(block.timestamp);
+        controller.rebalance(block.timestamp, address(0));
         _assertOriginalBasket();
         assertEq(router.calls(), 0);
     }
@@ -176,7 +147,7 @@ contract IndexIntegrationTest is Test {
     function testRouterCannotReenterBasketIssuanceDuringRebalance() public {
         router.configure(10000, false, true);
         vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
-        controller.execute(block.timestamp);
+        controller.rebalance(block.timestamp, address(0));
         _assertOriginalBasket();
     }
 
@@ -186,6 +157,6 @@ contract IndexIntegrationTest is Test {
         assertEq(assets[7].balanceOf(address(vault)), 0);
         assertEq(vault.totalSupply(), 1000e18);
         assertFalse(controller.executedQuarter(QUARTER));
-        assertEq(uint256(controller.proposal(assertionId).status), uint256(IndexController.Status.Accepted));
+        assertTrue(controller.rebalanceDue());
     }
 }

@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation} from "../src/Valuation.sol";
@@ -11,7 +11,7 @@ import {Valuation} from "../src/Valuation.sol";
 /// @dev Verifies the deployed contracts' on-chain linkage first: nothing is funded against a mis-bound deployment.
 contract Bootstrap is Script {
     function run() external {
-        M7CapVault vault = M7CapVault(payable(vm.envAddress("VAULT")));
+        M7Vault vault = M7Vault(payable(vm.envAddress("VAULT")));
         address deployer = vm.envAddress("DEPLOYER");
         require(vault.bootstrapper() == deployer && vault.totalSupply() == 0, "invalid bootstrap state");
         _verifyLinkage(vault);
@@ -33,10 +33,10 @@ contract Bootstrap is Script {
         }
         vault.bootstrap(amounts, receiver);
         vm.stopBroadcast();
-        console2.log("Bootstrapped M7CAP", address(vault));
+        console2.log("Bootstrapped M7", address(vault));
     }
 
-    function _verifyLinkage(M7CapVault vault) private view {
+    function _verifyLinkage(M7Vault vault) private view {
         IndexController controller = IndexController(vault.controller());
         require(address(controller).code.length > 0, "controller missing");
         require(address(controller.vault()) == address(vault), "controller not bound to vault");

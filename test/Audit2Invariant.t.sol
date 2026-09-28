@@ -3,9 +3,9 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {M7CapVault} from "../src/M7CapVault.sol";
+import {M7Vault} from "../src/M7Vault.sol";
 import {USDCGateway} from "../src/USDCGateway.sol";
-import {IM7CapVault} from "../src/interfaces/IM7CapVault.sol";
+import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {GatewayToken, GatewayFactory, GatewayRouter} from "./mocks/GatewayMocks.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {VaultHarness} from "./mocks/VaultHarness.sol";
@@ -13,7 +13,7 @@ import {VaultHarness} from "./mocks/VaultHarness.sol";
 /// @dev Random in-kind, resilient and gateway flows, donations, share burns, asset freezes and claim withdrawals.
 ///      Violations are latched in ghost flags because the invariant profile does not fail on handler reverts.
 contract Audit2Handler is Test {
-    M7CapVault public vault;
+    M7Vault public vault;
     USDCGateway public gateway;
     GatewayToken[8] public tokens;
     address[4] public actors = [address(0xA1), address(0xA2), address(0xA3), address(0xA4)];
@@ -26,7 +26,7 @@ contract Audit2Handler is Test {
     bool public gatewayOverspent;
     bool public resilientReverted;
 
-    constructor(M7CapVault vault_, USDCGateway gateway_, GatewayToken[8] memory tokens_) {
+    constructor(M7Vault vault_, USDCGateway gateway_, GatewayToken[8] memory tokens_) {
         vault = vault_;
         gateway = gateway_;
         tokens = tokens_;
@@ -207,7 +207,7 @@ contract Audit2Handler is Test {
 }
 
 contract Audit2InvariantTest is VaultHarness {
-    M7CapVault vault;
+    M7Vault vault;
     Audit2Handler handler;
     GatewayToken[8] tokens;
 
@@ -225,7 +225,7 @@ contract Audit2InvariantTest is VaultHarness {
             factory.setPool(address(tokens[i]), address(tokens[7]), 10, address(router));
         }
         (vault,) = _deployVault(assets, _spacings(10), router, factory, new PolicyRegistryMock());
-        USDCGateway gateway = new USDCGateway(IM7CapVault(address(vault)));
+        USDCGateway gateway = new USDCGateway(IM7Vault(address(vault)));
         for (uint256 i; i < 8; ++i) {
             tokens[i].mint(address(this), seed[i]);
             tokens[i].approve(address(vault), seed[i]);
