@@ -1,0 +1,201 @@
+{
+  "status": "bootstrapped_public_minting_open",
+  "chain_id": 8453,
+  "block": 51898002,
+  "token": "0x1ad2e897e19e659c0aecdb19c1c714f861865bee",
+  "name": "M7 Equal Weight",
+  "symbol": "M7",
+  "decimals": 18,
+  "seed_receiver": "0x7C3cf25108a28Bf70dBC52aD2A125f8f64cad90C",
+  "receiver_balance_raw": "990000000000000000000",
+  "supply_raw": "1000000000000000000000",
+  "locked_balance_raw": "10000000000000000000",
+  "seed_target_usdc": "125",
+  "wallet_remaining_eth_wei": "197699779021180",
+  "wallet_remaining_usdc_raw": "60390267",
+  "transactions": {
+    "AcquireSeed": [
+      {
+        "hash": "0xf464fc3e70f65170824f0c8dd937762d09d7f3dffd263e9664e3704928076c53",
+        "block": 51897794,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x65f22c1911580fd8b34839012ed475ad4c6801702f4d5be2420bbcd2db237db9",
+        "block": 51897795,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x38c38db70d211f86c93ff75bc9fa93dfd93c47326b4e3fe443085135f6ee22c9",
+        "block": 51897796,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xff9e0eee719a1f972b0837dff80cbf2d056fd632b30d4ca9a7e33a657417a0fb",
+        "block": 51897797,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xd8d08244cb33bbc7c1306aeb7330d9feac7756cf3a89cfc5d0b51ec238bf913b",
+        "block": 51897798,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x132671a4b28fdc361a2286bff17c91c8811518dc67b092a6f65eebec6b442624",
+        "block": 51897799,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xd64c1097ef80f1ad848c850b6d113b4a0595dd9ae20782383c0748ab0fdfb86b",
+        "block": 51897800,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x9e5fa06b855b07c63b8996d86a648168da25e751855674436ed3277669bed99d",
+        "block": 51897801,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x6e4cbdce81f136f3f505fdeed5b14984eadbb2c0b869a059686385de8b082fb1",
+        "block": 51897802,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x56a79cac90950c13ab322aa98943e8464be0d0dac073ec4c32376d8dc9586fc2",
+        "block": 51897803,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x28dfa942379305ecb5d290abcbe2a8f8712cd534b6795a0e5b4468ba2b865819",
+        "block": 51897804,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x5f0774fe07ac84590966b5abea80a6c78b7e3545bce1a542df871a44de025b27",
+        "block": 51897805,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xd1c8c159feba2161c5d89fba58ddc1c5b83034c85fe3f1345b19aff708824b3b",
+        "block": 51897806,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xad41254a672dffd7ebbf0370beb7dfab2551426d849f9828dfb498ba68e3bf41",
+        "block": 51897807,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x71418c88f79a94a63a4ac1f59de1843b8bc87cd5d773881d3ee57e97c3f7d95c",
+        "block": 51897808,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x01fabd5120333a5054697bb84759ec287c2066a5b9abaf374c53b61e01035144",
+        "block": 51897809,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x87549eac4ce48b4270ff39223664a10c56010adac97eaf0efc404156761a14c7",
+        "block": 51897810,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x68f3aab1371a7dfd7d7044bd4b8ac5e8e2e95be5d7d3bc934ed0ebfdd0161551",
+        "block": 51897811,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x075d2222cc1bc16bb01d52de0d288092737de8d25a9de728aef83d6bb6f3750a",
+        "block": 51897812,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xe1c30847253ab35b96dc75e7e9d5bd7c5d7874d23b189d6defadd2ccd2945d0d",
+        "block": 51897813,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x0b0ee5a75544289c3c47c867cdcd468b2066a10ad6015e3fe53bb898a1f7ddb7",
+        "block": 51897814,
+        "status": "0x1"
+      }
+    ],
+    "Bootstrap": [
+      {
+        "hash": "0x178aaa2e41bfbd5c94c6596380fdd69c4eb095427892085ef470c72d0778abc1",
+        "block": 51897826,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x5be0bab2edf19f84d9615e7b60cb0fefcd14f4f57c9cb43b6a22ba4485192d0b",
+        "block": 51897827,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x08fc1918442a7df2b2257577e819c6af638d6055c2da0a367504c55a7d6cfb82",
+        "block": 51897828,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x648d90d4d9c87340edbda901fb45f3ed462c0de2d7ad932007a804e63efaa397",
+        "block": 51897829,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x4938d0b4df01ba771e69c5b4a778349ab2928ae0a229530bb534a791aa41a12e",
+        "block": 51897830,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x7e937afb0eed83afa4f92d842fcd1d8f675ef60ad34bf290c9533844daef7c45",
+        "block": 51897831,
+        "status": "0x1"
+      },
+      {
+        "hash": "0xe72341a9d22cc6b69d6a2f4497ab9eb9ef71641e9cb68949649dd449fdd5f50b",
+        "block": 51897832,
+        "status": "0x1"
+      },
+      {
+        "hash": "0x21d101f6f92e96c82a8b6c5d9615bafe374784eeb503c7281fc55403aa778be8",
+        "block": 51897833,
+        "status": "0x1"
+      }
+    ]
+  },
+  "seed_usdc_spent_raw": "121530009",
+  "seed_existing_aaplc_raw": "1000000",
+  "bootstrap_verification": {
+    "passed": true,
+    "checks": 84,
+    "block": 51897960,
+    "price_per_share_usd": "0.124894"
+  },
+  "live_state_smoke": {
+    "passed": true,
+    "broadcast": false,
+    "checks": [
+      "gateway mint",
+      "USDC redemption",
+      "basket redemption without deferred claims",
+      "receipt transfer and return",
+      "supply conservation",
+      "gateway retains no assets"
+    ],
+    "source_sha256": "12c66b850f9418dfa2f4fdd6820f894fbf109022bf81cf777cd5d5eeb0eac581",
+    "source_file": "base-mainnet-smoke.sol"
+  },
+  "first_reset": {
+    "status": "pending_execution_window",
+    "earliest_window_utc": "2026-09-28T15:00:00Z",
+    "requires_valid_feeds": true,
+    "automatic_signing_configured": false
+  },
+  "monitor": {
+    "active": true,
+    "interval_minutes": 15,
+    "alerts": "server_journal",
+    "external_heartbeat": false
+  }
+}

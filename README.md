@@ -4,13 +4,21 @@ M7 turns seven Coinbase stock tokens on Base into one transferable ERC-20 receip
 
 M7's original code and documentation are free software released into the public domain under the [Unlicense](LICENSE), provided as is without warranty. The protocol has no fee, no owner, no admin keys and no upgrades. Users pay only the existing pools' prices and gas, and the vault pays whoever triggers a reset a small, bounded reward.
 
-This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. The current code passes native B20 tests against live Base under both Beryl and Cobalt precompile rules, and a rehearsal of the mainnet runbook on a local fork. No live funds were spent. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the mainnet runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
+M7 was deployed and bootstrapped on **Base mainnet (chain 8453) on September 28, 2026**. The $125 target seed created 1,000 M7: 990 for the seed receiver and 10 permanently locked. Public minting is open. All 84 post-bootstrap checks passed, and Sourcify reports exact creation and runtime source matches for all five contracts. The contracts have **not been independently audited**. Native integration tests passed under Beryl and simulated Cobalt rules; actual post-Cobalt checks remain pending. The first reset awaits the weekday 15:00–20:00 UTC execution window and valid feeds. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
 
 A [fourth internal review](docs/AUDIT-4.md) checks the tranche-based reset and fixes premature completion during precision-floor recovery, plus malformed oracle rounds in the display lens. The [third review](docs/AUDIT-3.md) covers the equal-weight redesign and its reset-capacity and sandwich findings. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
 
 The [architecture review](docs/ARCHITECTURE-REVIEW.md) evaluates decentralization, permanent venue dependencies, keeper incentives, and failure recovery. M7 has no ongoing administrator of its own; its assets, prices, execution venues, and chain still have external dependencies and authorities.
 
-The [release candidate record](docs/RELEASE-CANDIDATE.md) lists the latest shipping checks and remaining deployment steps. Predicted addresses are preparation data, not live contracts.
+The [deployment record](deployments/base-mainnet.json) contains actual creation transactions and the source commit. The [launch record](deployments/base-mainnet-launch.json) records seed purchases, bootstrap and checks; gateway minting, redemptions and transfers were also simulated against the deployed state without sending additional transactions. The [source verification record](deployments/base-mainnet-source.json) contains the public verification results. The [release candidate record](docs/RELEASE-CANDIDATE.md) preserves preparation evidence.
+
+| Contract | Base mainnet address and verified source |
+| --- | --- |
+| M7Vault (M7 token, 18 decimals) | [0x1aD2e897e19e659C0AEcdB19C1C714F861865BeE](https://repo.sourcify.dev/8453/0x1ad2e897e19e659c0aecdb19c1c714f861865bee) |
+| USDCGateway | [0xAbA592b5fdC0e3c48a9C1f1F7A3a9aebA17BCf1C](https://repo.sourcify.dev/8453/0xaba592b5fdc0e3c48a9c1f1f7a3a9aeba17bcf1c) |
+| IndexController | [0x685C8ffe61d8971b79FB8B0D4B1d845b1462fa8F](https://repo.sourcify.dev/8453/0x685c8ffe61d8971b79fb8b0d4b1d845b1462fa8f) |
+| Valuation | [0x9fEbE4a9947c37401e997aCd79f839DabF761e8e](https://repo.sourcify.dev/8453/0x9febe4a9947c37401e997acd79f839dabf761e8e) |
+| M7Lens | [0x66446507C6f153D68e5BFD33b10FE98033f11AB2](https://repo.sourcify.dev/8453/0x66446507c6f153d68e5bfd33b10fe98033f11ab2) |
 
 ## License
 
@@ -135,7 +143,7 @@ Each reset costs holders the pools' fees and price impact on its turnover, typic
 
 ## Deployment workflow
 
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the step-by-step mainnet runbook: roles and funding, the Cobalt go/no-go, deploy, seed, smoke tests, the first reset, monitoring and the incident playbook. The tools it uses:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the step-by-step mainnet runbook: roles and funding, the live-state preflight, deploy, seed, smoke tests, the first reset, monitoring and the incident playbook. The tools it uses:
 
 - `script/Deploy.s.sol` deploys the Valuation, controller, vault, gateway and lens. The controller is bound to the vault by CREATE address prediction, and the vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
 - `scripts/verify_deployment.py` checks every deployed immutable, binding and runtime bytecode before any funds go in, checks the state after the bootstrap, and writes the deployment record.

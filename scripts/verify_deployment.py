@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 from verify_base import RPC, address, keccak_text
 
@@ -19,6 +20,17 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ('Valuation', 'IndexController', 'M7Vault', 'USDCGateway', 'M7Lens')
 SEED_LOCK = '0x' + '00' * 19 + '01'
 WAD = 10**18
+
+
+def wait_for_block(rpc, minimum):
+    """A different read endpoint can lag the node that just mined the launch transaction."""
+    for attempt in range(16):
+        if int(rpc.block['number'], 16) >= minimum:
+            return
+        if attempt == 15:
+            raise ValueError('RPC is behind confirmed block %d; retry verification after it catches up' % minimum)
+        time.sleep(2)
+        rpc.block = rpc.rpc('eth_getBlockByNumber', ['latest', False])
 
 
 def decode_string(words):
@@ -177,6 +189,8 @@ def main():
     p.add_argument('--artifacts', type=Path, default=ROOT / 'out', help='Build output to compare bytecode against')
     p.add_argument('--no-bytecode', action='store_true', help='Skip the runtime bytecode comparison')
     p.add_argument('--bootstrapped', action='store_true', help='Also check the state right after Bootstrap.s.sol')
+    p.add_argument('--min-block', type=int, default=0,
+                   help='Wait up to 30 seconds for this confirmed block, e.g. the bootstrap receipt block')
     p.add_argument('--seed', type=Path, default=ROOT / os.environ.get('SEED_FILE', 'config/seed.json'))
     p.add_argument('--write-record', type=Path, help='Write the deployment record, e.g. deployments/base-mainnet.json')
     p.add_argument('--rpc', default=os.environ.get('BASE_RPC_URL', 'https://base-rpc.publicnode.com'))
@@ -188,7 +202,9 @@ def main():
         artifacts = None if args.no_bytecode else {
             name: json.loads((args.artifacts / (name + '.sol') / (name + '.json')).read_text()) for name in CONTRACTS}
         seed = json.loads(args.seed.read_text()) if args.bootstrapped else None
-        report = verify(RPC(args.rpc), manifest, {n: c['address'] for n, c in contracts.items()}, expected,
+        rpc = RPC(args.rpc)
+        wait_for_block(rpc, max(args.min_block, max(c['block'] or 0 for c in contracts.values())))
+        report = verify(rpc, manifest, {n: c['address'] for n, c in contracts.items()}, expected,
                         artifacts, seed)
         report['receipts_succeeded'] = all(c['status'] in (None, '0x1') for c in contracts.values())
         if not report['receipts_succeeded']:

@@ -7,6 +7,8 @@ ConditionPathExists=%h/.config/m7/deployed.env
 
 [Service]
 Type=oneshot
+# Exit 1 means alerts were recorded; exit 2 means the monitor could not complete its read/delivery.
+SuccessExitStatus=1
 WorkingDirectory=%h/.local/share/m7
 EnvironmentFile=%h/.config/m7/deployed.env
 Environment=PATH=%h/.local/share/m7/bin:/usr/local/bin:/usr/bin:/bin

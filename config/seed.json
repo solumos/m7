@@ -1,0 +1,40 @@
+{
+  "chain_id": 8453,
+  "vault": "0x1ad2e897e19e659c0aecdb19c1c714f861865bee",
+  "receiver": "0x7C3cf25108a28Bf70dBC52aD2A125f8f64cad90C",
+  "raw_amounts": [
+    5247830,
+    7193738,
+    5226420,
+    2428620,
+    3453687,
+    7972147,
+    4845378,
+    0
+  ],
+  "note": "Bootstrap basket of equal value per stock; stocks have 8 decimals, USDC is last and zero.",
+  "provenance": {
+    "symbols": [
+      "AAPLc",
+      "AMZNc",
+      "GOOGLc",
+      "METAc",
+      "MSFTc",
+      "NVDAc",
+      "TSLAc"
+    ],
+    "usd_target": "125",
+    "usd_value_at_prices": "124.999991",
+    "prices_usdc": [
+      "340.27667842",
+      "248.23175690",
+      "341.67061659",
+      "735.27925575",
+      "517.04573236",
+      "223.99414433",
+      "368.53972490"
+    ],
+    "block": 51897577,
+    "block_timestamp": "2026-09-28T08:35:01+00:00"
+  }
+}

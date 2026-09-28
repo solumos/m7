@@ -193,8 +193,11 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
    ```sh
    "$BASE_FORGE" script script/Bootstrap.s.sol:Bootstrap --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
      --broadcast --slow
-   python3 scripts/verify_deployment.py --bootstrapped
+   BOOTSTRAP_BLOCK=$(python3 -c 'import json; d=json.load(open("broadcast/Bootstrap.s.sol/8453/run-latest.json")); print(max(int(r["blockNumber"],16) for r in d["receipts"]))')
+   python3 scripts/verify_deployment.py --bootstrapped --min-block "$BOOTSTRAP_BLOCK"
    ```
+
+   The verifier waits up to 30 seconds for the read endpoint to reach the bootstrap receipt block. During the initial launch a lagging read endpoint returned `NotInitialized()` just after the successful bootstrap; the retry passed all 84 checks. If verification fails, inspect the transaction receipts before retrying a broadcast. A read failure does not mean the transaction failed.
 
    The verifier must report `"ok": true`: 1,000 shares with 10 locked, 990 held by the seed receiver, backing equal to the seed, and no reserves. Its `price_per_share_usd` should be about the seed's value divided by 1,000.
 
@@ -224,7 +227,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 
    The seed is already at equal value, so this first call trades nothing and completes the quarter: the script prints `Reset complete`, and `rebalanceDue()` becomes false. A revert changes nothing (`OutsideExecutionWindow`, `NoFreshMarketSignal`, `Too little received`, `PoolMoved`); retry later. The next quarter's reset opens 30 days after this one completed.
 
-6. Commit `config/seed.json` and `deployments/base-mainnet.json`, then tag the deployed commit and push the tag: `git tag -a v1.0.0 <commit in deployments/base-mainnet.json> && git push origin v1.0.0`.
+6. Commit the seed and launch records, then tag the release snapshot and push it. Preserve the actual deployment source commit in `deployments/base-mainnet.json`; release documentation and tooling may be updated afterward, but verify that `src/` and the compiler configuration have no differences from the deployed commit. Record both commits in the release manifest.
 
 **Abort rule:** if a smoke test fails, don't announce. The seed receiver can take the seed out in kind with `redeemBasketWithClaims`.
 

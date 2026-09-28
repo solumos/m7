@@ -6,6 +6,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+# Exit 1 means alerts were recorded; exit 2 means the monitor could not complete its read/delivery.
+SuccessExitStatus=1
 User=m7
 Group=m7
 # A checkout of the release commit; the monitor only reads it.

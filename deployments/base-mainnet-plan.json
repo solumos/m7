@@ -1,5 +1,5 @@
 {
-  "status": "prepared_not_deployed",
+  "status": "bootstrapped_public_minting_open",
   "prepared_on": "2026-09-28",
   "release_candidate": "v1.0.0-rc.1",
   "launch_timing": "immediate_under_beryl_requested_by_launch_organizer",
@@ -20,12 +20,12 @@
   },
   "account_policy_preflight_block": 51896512,
   "account_policy_preflight_passed": true,
-  "signer_configured": false,
+  "signer_configured": true,
   "signer_preparation": {
     "keystore_account": "m7-deployer",
     "keystore_present": true,
     "keystore_permissions": "0600",
-    "derived_address_verified": false
+    "derived_address_verified": true
   },
   "funding_preflight": {
     "block": 51897031,
@@ -39,7 +39,7 @@
     "seed_usdc_funding_available": true,
     "refresh_gas_estimates_before_broadcast": true
   },
-  "production_monitor_configured": false,
+  "production_monitor_configured": true,
   "monitor_preparation": {
     "service_installed": true,
     "service_mode": "systemd_user_with_lingering",
@@ -49,10 +49,11 @@
     "server_read_preflight_block": 51897303,
     "server_read_preflight_passed": true,
     "activation_guard_checked": true,
-    "timer_enabled": false,
-    "awaiting_verified_deployment_addresses": true,
+    "timer_enabled": true,
+    "awaiting_verified_deployment_addresses": false,
     "alert_delivery": "journal_logs_selected_by_launch_organizer",
-    "external_heartbeat_configured": false
+    "external_heartbeat_configured": false,
+    "first_live_read_block": 51897598
   },
   "post_cobalt_mainnet_validation_complete": false,
   "notes": [
@@ -60,5 +61,7 @@
     "Any outgoing transaction or nonce-changing authorization can invalidate these predictions; recompute before signing.",
     "The proposed seed receiver and size use the supplied address and the existing $125 example, pending any user correction.",
     "No seed quantities or live quotes are locked by this plan; recalculate after deployment verification."
-  ]
+  ],
+  "actual_deployment_record": "base-mainnet.json",
+  "launch_record": "base-mainnet-launch.json"
 }

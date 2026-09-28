@@ -1,0 +1,52 @@
+{
+  "chain_id": 8453,
+  "verified_at_block": 51897549,
+  "commit": "296b57e6d13af81da9f574baf121db1e78f0a758",
+  "working_tree_dirty": false,
+  "toolchain": [
+    "forge Version: 1.6.0-nightly",
+    "Commit SHA: 98e7839c65f64aee9627b69a9b98b79afaeb1fae",
+    "Build Timestamp: 2026-09-26T06:37:20.894271000Z (1790404640)",
+    "Build Profile: dist"
+  ],
+  "deployer": "0x7c3cf25108a28bf70dbc52ad2a125f8f64cad90c",
+  "contracts": {
+    "Valuation": {
+      "address": "0x9febe4a9947c37401e997acd79f839dabf761e8e",
+      "transaction": "0x5a3d8ebbb7117cabe139396673291bfd96396692eeec092e5280b9ebb08b32ad",
+      "block": 51897533,
+      "status": "0x1"
+    },
+    "IndexController": {
+      "address": "0x685c8ffe61d8971b79fb8b0d4b1d845b1462fa8f",
+      "transaction": "0x91fa8462bfc842185b264ff633efd2f73cac187babb12f44e359903993a52481",
+      "block": 51897534,
+      "status": "0x1"
+    },
+    "M7Vault": {
+      "address": "0x1ad2e897e19e659c0aecdb19c1c714f861865bee",
+      "transaction": "0x1a94af7b408659a8f7e737a999c82b2dc6cd9ea84857530bc8cc204fe0c4623b",
+      "block": 51897535,
+      "status": "0x1"
+    },
+    "USDCGateway": {
+      "address": "0xaba592b5fdc0e3c48a9c1f1f7a3a9aeba17bcf1c",
+      "transaction": "0x1f0ef3caab56e30c026bee6ce3177694e8dceff8d1f284710c2a7cdf7625db9b",
+      "block": 51897536,
+      "status": "0x1"
+    },
+    "M7Lens": {
+      "address": "0x66446507c6f153d68e5bfd33b10fe98033f11ab2",
+      "transaction": "0x9fad337c28f80ab92ce3b92c5b06f7654f5ed85e8b88ce8faa2ef2a912cbf852",
+      "block": 51897537,
+      "status": "0x1"
+    }
+  },
+  "runtime_metadata_matches_build": {
+    "Valuation": true,
+    "IndexController": true,
+    "M7Vault": true,
+    "USDCGateway": true,
+    "M7Lens": true
+  }
+}
