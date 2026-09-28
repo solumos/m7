@@ -39,3 +39,12 @@ interface ISlipstreamRouter {
 interface ISlipstreamFactory {
     function getPool(address tokenA, address tokenB, int24 tickSpacing) external view returns (address);
 }
+
+/// @dev Slipstream CLPool's Uniswap V3-style oracle. An observation is written at most once per block, before that
+///      block's first swap, so trades inside the current block do not move the averages it returns.
+interface ISlipstreamPoolOracle {
+    function observe(uint32[] calldata secondsAgos)
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
+}

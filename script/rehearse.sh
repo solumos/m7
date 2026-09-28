@@ -148,18 +148,25 @@ grep -q "equal-weight reset" "$WORK/logs/monitor.json" || fail "monitor did not 
 grep -q '"price_per_share_usd"' "$WORK/logs/monitor.json" || fail "monitor did not report the price per share"
 
 step "First reset, with the runbook's Maintain.s.sol:Rebalance"
-# Inside the execution window (a weekday, 15:00-20:00 UTC, with fresh prices) the reset runs on the fork. Outside it,
-# the valuation's gates must refuse it and leave this quarter's reset due.
+# Inside the execution window (a weekday, 15:00-20:00 UTC, with fresh prices) a tranche runs on the fork; the
+# equal-value seed needs no trade, so it completes the quarter. Outside the window, the valuation's gates must refuse
+# it and leave this quarter's reset due.
 LOG="$WORK/logs/rebalance.log"
+QUARTER=$(cast call "$CONTROLLER" 'currentQuarter()(uint32)' --rpc-url "$LOCAL")
 if EXECUTOR=$USER "$BIN/forge" script script/Maintain.s.sol:Rebalance --rpc-url "$LOCAL" --unlocked --sender "$USER" \
   --broadcast --gas-estimate-multiplier 200 >"$LOG" 2>&1; then
-  [ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = false ] || fail "the reset ran but is still due"
+  [ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = false ] || fail "a tranche ran but no cooldown began"
   python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
     --state-file "$WORK/monitor-state.json" >"$WORK/logs/monitor-after-reset.json" || true
   monitor_ok "$WORK/logs/monitor-after-reset.json" ||
     fail "monitor.py alert or read failure after the reset (see $WORK/logs/monitor-after-reset.json)"
-  ! grep -q "equal-weight reset" "$WORK/logs/monitor-after-reset.json" || fail "the monitor still reports the reset as due"
-  RESET="ran on the fork"
+  if [ "$(cast call "$CONTROLLER" 'executedQuarter(uint32)(bool)' "$QUARTER" --rpc-url "$LOCAL")" = true ]; then
+    ! grep -q "equal-weight reset" "$WORK/logs/monitor-after-reset.json" || fail "the monitor still reports the reset"
+    RESET="completed on the fork"
+  else
+    grep -q "in progress" "$WORK/logs/monitor-after-reset.json" || fail "the monitor does not report the tranches"
+    RESET="one tranche ran on the fork; the quarter needs more, at least 30 minutes apart"
+  fi
 else
   GATE=$(grep -o -E 'OutsideExecutionWindow|NoFreshMarketSignal|UnavailablePrice\([0-9]+\)|SequencerUnavailable' "$LOG" |
     head -1 || true)

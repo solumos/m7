@@ -69,6 +69,8 @@ contract Audit3Handler is Test {
     bool public resetLeftExcessCash;
     bool public resetNotEqualAfterFullStep;
     bool public resetTouchedClaims;
+    bool public legAboveCap;
+    bool public tradedThroughMovedPool;
 
     uint256 public resetsSucceeded;
     uint256 public resetsTraded;
@@ -77,6 +79,7 @@ contract Audit3Handler is Test {
     uint256 public rewardsWithoutTrades;
     uint256 public fullStepChecks;
     uint256 public partialSteps;
+    uint256 public poolMovedRefusals;
     bytes[] public revertReasons;
     mapping(bytes32 => uint256) public revertCount;
 
@@ -100,6 +103,8 @@ contract Audit3Handler is Test {
 
     function mintInKind(uint256 actorSeed, uint256 shares) external {
         address who = actors[actorSeed % 3];
+        // Each mint may double the supply; stop growing before balances overflow over long sequences.
+        if (vault.totalSupply() > 1e33) return;
         shares = bound(shares, 1e15, vault.totalSupply());
         try vault.quoteMint(shares) returns (uint256[8] memory amounts) {
             for (uint256 i; i < 8; ++i) {
@@ -145,6 +150,7 @@ contract Audit3Handler is Test {
 
     function donate(uint256 index, uint256 bps) external {
         index = index % 8;
+        if (vault.backing(index) > 1e33) return;
         uint256 amount =
             Math.max(vault.backing(index), index == 7 ? 1e6 : 1e8) * bound(bps, 1, 5_000) / 10_000;
         tokens[index].mint(address(vault), amount);
@@ -187,6 +193,17 @@ contract Audit3Handler is Test {
         venue.setHaircuts(bound(sellBps, 0, 40), bound(buyBps, 0, 40));
     }
 
+    /// Arbitrage returns every pool to its 10-minute average.
+    function calmPools() external {
+        venue.setTicks(venue.averageTick(), venue.averageTick());
+    }
+
+    /// Someone pushes the pools: every stock's pool tick sits up to 50 ticks from its 10-minute average.
+    function pushPools(uint256 spotSeed, uint256 averageSeed) external {
+        int24 average = int24(int256(bound(averageSeed, 0, 200_000)) - 100_000);
+        venue.setTicks(average + int24(int256(bound(spotSeed, 0, 100)) - 50), average);
+    }
+
     // ------------------------------------------------------------------ the quarterly reset
 
     /// Travels 1-120 days to a weekday 16:00 UTC, reports every feed fresh, and resets. Optionally tries a second reset
@@ -209,6 +226,21 @@ contract Audit3Handler is Test {
         }
     }
 
+    /// The next tranche half an hour later, or at the next weekday's 15:00 UTC if that leaves the window.
+    function nextTranche() external {
+        uint256 t = block.timestamp + controller.TRANCHE_COOLDOWN();
+        if (t % 1 days < 15 hours) t = t / 1 days * 1 days + 15 hours;
+        if (t % 1 days >= 20 hours) t = (t / 1 days + 1) * 1 days + 15 hours;
+        while ((t / 1 days + 4) % 7 == 0 || (t / 1 days + 4) % 7 == 6) {
+            t += 1 days;
+        }
+        vm.warp(t);
+        for (uint256 i; i < 8; ++i) {
+            feeds[i].set(feeds[i].answer(), t);
+        }
+        _reset();
+    }
+
     struct Before {
         uint256[8] prices;
         uint256[8] reserved;
@@ -216,11 +248,13 @@ contract Audit3Handler is Test {
         uint256 supply;
         uint256 keeper;
         uint256 calls;
+        uint256 cash;
         bool due;
     }
 
     function _reset() private returns (bool ok) {
         Before memory b;
+        b.cash = vault.backing(7);
         b.due = !controller.executedQuarter(controller.currentQuarter());
         b.prices = valuation.snapshot();
         b.nav = _nav(b.prices);
@@ -233,10 +267,11 @@ contract Audit3Handler is Test {
             ok = true;
             ++resetsSucceeded;
             _afterReset(b);
-            if (_fullStep(vm.getRecordedLogs())) _checkEqual(b.prices);
+            if (_completed(vm.getRecordedLogs())) _checkEqual(b.prices);
             else ++partialSteps;
         } catch (bytes memory reason) {
             ++resetsReverted;
+            if (bytes4(reason) == IndexController.PoolMoved.selector) ++poolMovedRefusals;
             if (revertCount[keccak256(reason)]++ == 0) revertReasons.push(reason);
         }
         _record();
@@ -253,23 +288,29 @@ contract Audit3Handler is Test {
         }
         uint256 reward = tokens[7].balanceOf(KEEPER) - b.keeper;
         uint256 rewardValue = reward * b.prices[7] / 1e6;
-        if (rewardValue > Math.min(b.nav * 0.00005e18 / WAD, 25e18) + b.prices[7] / 1e6) {
-            rewardAboveBound = true;
-        }
         (uint256 traded, uint256 legs) = _traded(b.prices, b.calls);
+        // 5 bp of the one-way traded value, at most $25; `traded` counts both ways, so this bound has room.
+        if (rewardValue > Math.min(traded * 5 / 10_000, 25e18) + b.prices[7] / 1e6) rewardAboveBound = true;
         if (legs != 0) ++resetsTraded;
         else if (reward != 0) ++rewardsWithoutTrades;
         uint256 navAfter = _nav(b.prices);
         uint256 slack = legs * Math.max(b.prices[7] / 1e6, _maxStockUnitValue(b.prices)) + 8;
         if (navAfter + traded / 100 + rewardValue + slack < b.nav) resetLossAboveBound = true;
-        uint256 cash = vault.backing(7) * b.prices[7] / 1e6;
-        if (cash > Math.max(navAfter / 10_000, 7 * 1e4 * b.prices[7] / 1e6)) resetLeftExcessCash = true;
+        // Cash never grows beyond what was there plus the cap: a tranche invests its share and holds back the rest.
+        uint256 cap = Math.max(navAfter / 10_000, 7 * 1e4 * b.prices[7] / 1e6);
+        if (vault.backing(7) * b.prices[7] / 1e6 > Math.max(cap, b.cash * b.prices[7] / 1e6) + cap) {
+            resetLeftExcessCash = true;
+        }
     }
 
-    /// After a full step, stocks clearly above the precision floor hold equal value within the 30 bp compliance band,
-    /// plus $0.02 for skipped dust legs and rounding.
+    /// When a reset completes, stocks clearly above the precision floor hold equal value within the deadband, plus the
+    /// venue's pricing noise and $0.02 for skipped dust legs and rounding; cash is within its cap.
     function _checkEqual(uint256[8] memory prices) private {
         ++fullStepChecks;
+        uint256 nav = _nav(prices);
+        if (vault.backing(7) * prices[7] / 1e6 > Math.max(nav / 10_000, 7 * 1e4 * prices[7] / 1e6)) {
+            resetLeftExcessCash = true;
+        }
         uint256 floorUnits = Math.mulDiv(
             vault.MIN_LOCKED_STOCK_UNITS(), vault.totalSupply(), vault.LOCKED_SHARES(), Math.Rounding.Ceil
         );
@@ -285,32 +326,34 @@ contract Audit3Handler is Test {
         if (high != 0 && high > low * 10_031 / 10_000 + 0.02e18) resetNotEqualAfterFullStep = true;
     }
 
-    function _fullStep(Vm.Log[] memory logs) private pure returns (bool) {
+    function _completed(Vm.Log[] memory logs) private pure returns (bool) {
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].topics[0] == IndexController.Rebalanced.selector) {
-                (,, uint256 step,,,) =
-                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256, uint256));
-                return step == WAD;
+                (,,,,,, bool completed) =
+                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256, uint256, bool));
+                return completed;
             }
         }
         return false;
     }
 
-    /// Oracle value of everything the vault sold or spent during the reset, from the venue's own call log.
-    function _traded(uint256[8] memory prices, uint256 from)
-        private
-        view
-        returns (uint256 traded, uint256 legs)
-    {
+    /// Oracle value of everything the vault sold or spent during the reset, from the venue's own call log. Each sale
+    /// must be within the $10k cap, and each purchase within it plus 1% for sales filled above the oracle. No stock may
+    /// trade through a pool pushed more than 25 ticks against the vault.
+    function _traded(uint256[8] memory prices, uint256 from) private returns (uint256 traded, uint256 legs) {
         for (uint256 k = from; k < venue.callCount(); ++k) {
             PricedVenue.Call memory c = venue.callAt(k);
             ++legs;
-            if (c.tokenIn == address(tokens[7])) {
-                traded += c.amountIn * prices[7] / 1e6;
-            } else {
-                for (uint256 i; i < 7; ++i) {
-                    if (c.tokenIn == address(tokens[i])) traded += c.amountIn * prices[i] / 1e8;
-                }
+            bool buying = c.tokenIn == address(tokens[7]);
+            for (uint256 i; i < 7; ++i) {
+                if (address(tokens[i]) != (buying ? c.tokenOut : c.tokenIn)) continue;
+                uint256 value = buying ? c.amountIn * prices[7] / 1e6 : c.amountIn * prices[i] / 1e8;
+                traded += value;
+                if (value > (buying ? 10_100e18 : 10_000e18)) legAboveCap = true;
+                int256 dearer = address(tokens[7]) < address(tokens[i])
+                    ? int256(venue.averageTick()) - venue.spotTick()
+                    : int256(venue.spotTick()) - venue.averageTick();
+                if (buying ? dearer > 25 : -dearer > 25) tradedThroughMovedPool = true;
             }
         }
     }
@@ -432,12 +475,14 @@ contract Audit3InvariantTest is Test {
     }
 
     function invariant_audit3ResetBounds() public view {
-        assertFalse(handler.rewardAboveBound(), "reward above min(0.5 bp of NAV, $25)");
+        assertFalse(handler.rewardAboveBound(), "reward above min(5 bp of the traded value, $25)");
         assertFalse(handler.supplyChangedByReset(), "a reset changed the share supply");
-        assertFalse(handler.secondResetInAQuarter(), "two resets in one quarter");
+        assertFalse(handler.secondResetInAQuarter(), "a tranche after completion or inside the cooldown");
         assertFalse(handler.resetLossAboveBound(), "reset loss above 1% of traded value plus the reward");
         assertFalse(handler.resetLeftExcessCash(), "reset left cash above its cap");
-        assertFalse(handler.resetNotEqualAfterFullStep(), "full reset left unequal weights");
+        assertFalse(handler.resetNotEqualAfterFullStep(), "a completed reset left unequal weights");
+        assertFalse(handler.legAboveCap(), "a trade above the $10k cap");
+        assertFalse(handler.tradedThroughMovedPool(), "a trade through a pool pushed against the vault");
         assertFalse(handler.resetTouchedClaims(), "a reset changed or underfunded deferred claims");
     }
 
@@ -474,7 +519,10 @@ contract Audit3InvariantTest is Test {
             else if (action < 48) handler.toggleFreeze(a);
             else if (action < 53) handler.unfreezeAll();
             else if (action < 75) handler.movePrice(a, b, c);
-            else if (action < 80) handler.setVenueHaircuts(a, b);
+            else if (action < 77) handler.setVenueHaircuts(a, b);
+            else if (action < 78) handler.pushPools(a, b);
+            else if (action < 80) handler.calmPools();
+            else if (action < 90) handler.nextTranche();
             else handler.reset(a, b % 2 == 0);
         }
         afterInvariant();
@@ -492,9 +540,10 @@ contract Audit3InvariantTest is Test {
     function afterInvariant() public {
         emit log_named_uint("resets succeeded", handler.resetsSucceeded());
         emit log_named_uint("  of which traded", handler.resetsTraded());
-        emit log_named_uint("  full-step equal-weight checks", handler.fullStepChecks());
+        emit log_named_uint("  completions checked for equal weight", handler.fullStepChecks());
         emit log_named_uint("  rewards paid without a trade", handler.rewardsWithoutTrades());
-        emit log_named_uint("  partial steps", handler.partialSteps());
+        emit log_named_uint("  partial tranches", handler.partialSteps());
+        emit log_named_uint("  pool-moved refusals", handler.poolMovedRefusals());
         emit log_named_uint("resets reverted", handler.resetsReverted());
         emit log_named_uint("repeat resets refused", handler.repeatResetsRefused());
     }

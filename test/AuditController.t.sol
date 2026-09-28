@@ -10,11 +10,12 @@ import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {ControllerToken, ControllerFeed, ControllerRegistry} from "./mocks/ControllerMocks.sol";
+import {PoolOracleMock} from "./mocks/PoolOracleMock.sol";
 
 /// @dev Models a funded, attacker-owned pool reached through the immutable router.
 ///      This is not a native Aerodrome fork: it isolates the controller's acceptance of
 ///      unnecessary round trips that transfer the full permitted NAV loss to a venue.
-contract AuditControllerVenue is ISlipstreamRouter, ISlipstreamFactory {
+contract AuditControllerVenue is ISlipstreamRouter, ISlipstreamFactory, PoolOracleMock {
     address public immutable usdc;
 
     constructor(address usdc_) {
@@ -122,11 +123,11 @@ contract AuditControllerTest is Test {
         uint256 navBefore = _nav();
         controller.rebalance(block.timestamp, address(this));
         uint256 reward = assets[7].balanceOf(address(this)) * 1e12;
-        assertApproxEqAbs(reward, 3.525e18, 1e12); // 0.5 bp of $70,500
-        // Only the needed turnover trades: each stock ends at $10,070.93, a seventh of NAV after the reward, and the
-        // venue keeps 0.5% of the $425.55 bought, not 50 bp of NAV.
-        assertApproxEqAbs(navBefore - _nav(), 425.55e18 * 5 / 1000 + reward, 0.01e18);
-        assertApproxEqAbs(assets[0].balanceOf(address(vault)), 100.70925e8, 0.0001e8);
+        assertApproxEqAbs(reward, 0.214285e18, 1e12); // 5 bp of the $428.57 traded
+        // Only the needed turnover trades: each stock ends at $10,071.40, a seventh of NAV after the reward, and the
+        // venue keeps 0.5% of the $428.39 bought, not 50 bp of NAV.
+        assertApproxEqAbs(navBefore - _nav(), 428.39e18 * 5 / 1000 + reward, 0.01e18);
+        assertApproxEqAbs(assets[0].balanceOf(address(vault)), 100.71398e8, 0.0001e8);
     }
 
     // M-03 regression: a heartbeat-conforming quiet feed no longer blocks the window.

@@ -6,7 +6,7 @@ It is free software: no fee, no owner, no admin keys and no upgrades. Users pay 
 
 This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. The current code passes native B20 tests against live Base under both Beryl and Cobalt precompile rules, and a rehearsal of the mainnet runbook on a local fork. No live funds were spent. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the mainnet runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
 
-A [third internal review](docs/AUDIT-3.md) covers the current equal-weight code: no path to take or dilute deposits was found, and it records two medium findings about the reset at larger sizes, with reproductions on live Base pools. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
+A [third internal review](docs/AUDIT-3.md) covers the equal-weight code: no path to take or dilute deposits was found. Its two medium findings, about the reset at larger sizes, and its six smaller ones are fixed, with regression tests on live Base pools. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
 
 ## Run it
 
@@ -59,12 +59,12 @@ flowchart LR
 
 - **M7Vault:** ERC-20 shares plus asset custody. For backing `B[i]` (balance minus amounts owed to earlier redeemers), supply `S`, and shares `q`, minting collects `ceil(B[i]*q/S)` and redemption returns `floor(B[i]*q/S)`. Actual holdings include incidental USDC, preventing cash from becoming unaccounted backing. Shares mint only after exact transfers succeed. In-kind transactions need no price oracle. `redeemBasket` is all-or-nothing. `redeemBasketWithClaims` delivers every leg that can move and turns a leg that cannot (a frozen or paused asset, a blocked receiver) into a claim the redeemer withdraws later; nothing is forfeited. Receipt transfers, mints and redemptions mirror the seven stocks' B20 transfer policies. Each stock trades only through one pinned USDC pool, checked when the vault is constructed. Only the controller can trade vault assets, and only the controller can pay the reset reward, in USDC, never from deferred claims.
 - **USDCGateway:** exact-output purchases for a requested share count and exact-input sales for redemptions, through the vault's pinned pools; callers do not choose routes. The total spending ceiling or minimum proceeds protect execution. Unspent USDC returns to the caller. The gateway has no owner and charges no fee, and USDC donated to it can never be spent or withdrawn.
-- **IndexController:** resets the vault to equal value once per calendar quarter. Anyone may call `rebalance(deadline, rewardTo)`; the caller supplies no trades. The controller plans every leg from the vault's backing and one oracle snapshot:
-  - targets are equal value at that snapshot, and a reset may at most double a stock's quantity share;
-  - every stock is only sold or only bought, sales first;
-  - each leg's minimum output is its oracle value less 1%, total loss is bounded by 1% of traded value plus the reward, and selling more than half of NAV is refused;
-  - the result must match the target within 30 bp and leave at most max(1 bp of NAV, $0.07) in cash; within 10 bp nothing trades;
-  - a reset that trades pays `rewardTo` min(0.5 bp of NAV, $25) in USDC, funded pro rata by every stock.
+- **IndexController:** resets the vault to equal value each calendar quarter, in tranches. Anyone may call `rebalance(deadline, rewardTo)` at least 30 minutes after the last tranche; the caller supplies no trades. The controller plans every leg from the vault's backing and one oracle snapshot:
+  - targets are equal value at that snapshot; each tranche moves every stock the same fraction of the way, so that no trade is worth more than about $10,000, and at most doubles a stock's quantity share;
+  - every stock is only sold or only bought, sales first, and no trade starts in a pool more than 25 ticks against the vault from its own 10-minute average;
+  - each leg's minimum output is its oracle value less 1%, and total loss is bounded by 1% of traded value plus the reward;
+  - no stock ends further from its target than it started; the quarter completes once every stock is within 10 bp of equal value and cash is within max(1 bp of NAV, $0.07); the next quarter's reset opens 30 days later at the earliest;
+  - a tranche that trades pays `rewardTo` 5 bp of its one-way traded value, at most $25, in USDC, funded pro rata by every stock.
 
   There are no arbitrary calls, admin, upgrade keys, or asset-withdrawal functions.
 - **Valuation:** reads total-return feeds once per reset and uses that same snapshot for targets and for the before and after values. Multipliers are not applied twice. A reset requires issuer feeds unpaused and the sequencer healthy beyond a 1-hour grace period. Every stock price must be at most 25 hours old (the published heartbeat plus an hour), at least one stock price at most 1 hour old as evidence the market is open, and USDC at most 25 hours old. Resets are limited to weekdays 15:00–20:00 UTC. A replay of the ten weekdays to 2026-09-26 found 96% of window slots usable under this rule.
@@ -97,7 +97,8 @@ gateway.mintWithUSDC(sharesOut, maxUSDCIn, receiver, deadline);
 gateway.redeemToUSDC(sharesIn, minUSDCOut, receiver, deadline);
 
 controller.rebalanceDue();                // whether this quarter's reset has yet to run
-controller.rebalance(deadline, rewardTo); // anyone; rewardTo = address(0) declines the reward
+controller.rebalance(deadline, rewardTo); // anyone, one tranche; rewardTo = address(0) declines the reward
+controller.nextTrancheAt();               // earliest start of the next tranche (the valuation's window aside)
 
 lens.pricePerShare();                     // USD per whole M7 (18 decimals), stalest price time
 lens.totalValue();                        // USD value of all backing (18 decimals), stalest price time
@@ -116,9 +117,9 @@ Between resets the token quantities stay fixed and weights drift with prices. Th
 FOUNDRY_BASE=cobalt "$BASE_FORGE" script script/Maintain.s.sol:Rebalance --rpc-url "$BASE_RPC_URL"
 ```
 
-The script reads `CONTROLLER`, `EXECUTOR`, an optional `REWARD_TO` (default the executor) and an optional `DEADLINE`, and refuses if this quarter's reset already ran. Simulate before broadcasting. A reset that reverts (outside the window, stale prices, a pool too far from its oracle price) changes nothing and can be retried later in the quarter; if a quarter passes without one, the basket simply keeps its quantities.
+The script reads `CONTROLLER`, `EXECUTOR`, an optional `REWARD_TO` (default the executor) and an optional `DEADLINE`. It runs one tranche and reports whether the quarter completed or when the next tranche may start; it refuses once the quarter is complete or too soon after the last tranche. Simulate before broadcasting. A tranche that reverts (outside the window, stale prices, a pool too far from its oracle price or pushed from its own average) changes nothing and can be retried; if a quarter passes without a completed reset, the next quarter continues it and the basket keeps its quantities meanwhile.
 
-Each trading reset costs holders the pools' fees and price impact on its turnover, typically 5–15% of the vault's value per quarter, plus the reward: 0.5 bp of NAV, at most $25. The reward is small until the vault is large, so bots may not trigger resets for a small vault; anyone can trigger one by hand. `scripts/monitor.py` alerts when a quarter's reset is still undone a week in, and as critical with 21 days or fewer left; see [Monitoring](docs/DEPLOYMENT.md#monitoring).
+Each reset costs holders the pools' fees and price impact on its turnover, typically 5–15% of the vault's value per quarter, plus the rewards: 5 bp of the traded value, at most $25 per tranche. At that rate the reward is small until the vault is large, so bots may not run resets for a small vault; anyone can run the tranches by hand. The $10,000 trade cap keeps each tranche inside today's pool depth: in a volatile quarter a vault of about $1M needs a handful of tranches, and one of $10M about 50, a week of ten tranches a day. `scripts/monitor.py` alerts when a quarter's reset is still incomplete a week after it opens, and as critical with 21 days or fewer left; see [Monitoring](docs/DEPLOYMENT.md#monitoring).
 
 ## Deployment workflow
 

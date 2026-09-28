@@ -92,9 +92,10 @@ contract BaseForkTest is VaultHarness {
         }
     }
 
-    /// @dev The quarterly equal-weight reset through the live pinned pools with native B20 transfers. The seed holds
-    ///      twice as much AAPLc by value as each other stock, so the reset sells AAPLc, pays the keeper and buys the
-    ///      rest. Feeds are mocked only to report their fork-time answers as fresh in the next execution window.
+    /// @dev The quarterly equal-weight reset through the live pinned pools with native B20 transfers, including the pool
+    ///      check against each pool's own time-weighted average. The seed holds twice as much AAPLc by value as each
+    ///      other stock, so one tranche sells AAPLc, buys the rest and pays the keeper. Feeds are mocked only to report
+    ///      their fork-time answers as fresh in the next execution window.
     function testBaseNativeResetToEqualWeightsThroughLivePools() public {
         _startFork();
         IndexController controller = _deployFixtureController();
@@ -305,8 +306,8 @@ contract BaseForkTest is VaultHarness {
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].topics[0] == M7Vault.RebalanceLeg.selector) ++legs;
             if (logs[i].topics[0] == IndexController.Rebalanced.selector) {
-                (navBefore, navAfter,, sold, bought, reward) =
-                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256, uint256));
+                (navBefore, navAfter,, sold, bought, reward,) =
+                    abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256, uint256, bool));
             }
         }
     }

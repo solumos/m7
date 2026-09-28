@@ -1,6 +1,6 @@
 # Base integration evidence and launch gates
 
-`config/base.json` pins canonical assets and integrations with primary-source URLs. Its `verification` field records a read-only onchain snapshot at Base block **51,883,453**, hash `0x2dc51fa84a7ed91413dccd75188657396eafbbe899305ef50875fdea9b24fe88`, timestamp **2026-09-28 00:44:13 UTC**. It is historical evidence, not deployment approval. No wallet was used and no live transaction was signed, funded, or broadcast. Subsequent local Base forks executed the full stock acquisition, bootstrap, gateway round trip and an equal-weight reset, as recorded below.
+`config/base.json` pins canonical assets and integrations with primary-source URLs. Its `verification` field records a read-only onchain snapshot at Base block **51,894,325**, hash `0x040478d56ecc33ed757c8b8a93d41592454b0c5ba1d1962a14bea48538cb3371`, timestamp **2026-09-28 06:46:37 UTC**. It is historical evidence, not deployment approval. No wallet was used and no live transaction was signed, funded, or broadcast. Subsequent local Base forks executed the full stock acquisition, bootstrap, gateway round trip and an equal-weight reset, as recorded below.
 
 ## Verified integrations
 
@@ -10,7 +10,7 @@ The stocks are B20 native precompiles and have no ordinary bytecode. Never rejec
 
 All seven direct USDC pairs exist with active liquidity at tick spacing **10** on Aerodrome's gauges V3 factory. The router and quoter both report that same factory. Initial and gauge-caps factories were also probed across tick spacings 1, 10, 50, 100, 200, 500, and 2000; no stock pairs were found there. Chosen deployments come from the [Aerodrome repository](https://github.com/aerodrome-finance/slipstream#deployments).
 
-Anyone can create a pool at an unused enabled tick spacing on this factory, and non-canonical constituent pools already exist. On 2026-09-26, AAPLc/USDC at tick spacing 200 had zero active liquidity at the minimum tick, and AMZNc/USDC at 1 and NVDAc/USDC at 200 held only dust. The vault therefore pins each stock's reviewed tick spacing (`tick_spacing` in the manifest, currently 10) at construction. Neither rebalances nor the gateway can use any other pool.
+Anyone can create a pool at an unused enabled tick spacing on this factory, and non-canonical constituent pools already exist. On 2026-09-26, AAPLc/USDC at tick spacing 200 had zero active liquidity at the minimum tick, and AMZNc/USDC at 1 and NVDAc/USDC at 200 held only dust. The vault therefore pins each stock's reviewed tick spacing (`tick_spacing` in the manifest, currently 10) at construction. Neither resets nor the gateway can use any other pool. Before a reset trades in a pool, it compares the pool's price with its own 10-minute average, which needs 300 stored price observations at one per block: the pinned pools keep 360 (AMZNc, MSFTc, TSLAc) or 2,048 (the others), and the preflight checks this.
 
 | Integration | Address |
 | --- | --- |
@@ -30,9 +30,9 @@ The quoter successfully simulated exact-output USDC purchases and exact-input st
 
 | Reference USD basket value | USDC to buy exact stock quantities | USDC received selling those quantities |
 | ---: | ---: | ---: |
-| 10 | 9.995275 | 9.985254 |
-| 100 | 99.952856 | 99.852872 |
-| 1,000 | 999.530154 | 998.527614 |
+| 10 | 9.998468 | 9.988447 |
+| 100 | 99.984773 | 99.884784 |
+| 1,000 | 999.848219 | 998.847657 |
 
 Buy and sell quotes are independent calls against the same starting block, not consecutive legs of a simulated round trip. Values exclude gas and are relative to the published oracle reference (which can be stale), not an assertion of current fair value. Per-component raw quantities and quote results are in the manifest. An `eth_call` quoter result does not prove that a funded user can complete a seven-swap atomic gateway transaction, including all issuer policy checks.
 
@@ -56,20 +56,22 @@ Registry pauses and sequencer outages are not replayed. [Feed behavior](https://
 
 ## Native Base fork tests
 
-`test/BaseFork.t.sol` runs the current contracts against live Base state with native B20 execution. On 2026-09-28 (UTC) all four tests passed with base-anvil `nightly-98e7839c65f6` (base/base `3eb4817`, binaries checked with `gh attestation verify`), under both precompile rule sets: Beryl, which mainnet runs until 2026-09-30 18:00 UTC, and Cobalt after that. Figures are from the Cobalt-rule run, at blocks **51,883,749** to **51,883,797**. Each test creates USDC only in local fork storage and acquires every B20 through its actual Slipstream pool. No B20 balance or code is fabricated, and nothing is broadcast.
+`test/BaseFork.t.sol` runs the current contracts against live Base state with native B20 execution. On 2026-09-28 (UTC) all four tests passed on the remediated code with base-anvil `nightly-98e7839c65f6` (base/base `3eb4817`, binaries checked with `gh attestation verify`), under both precompile rule sets: Beryl, which mainnet runs until 2026-09-30 18:00 UTC, and Cobalt after that. Figures are from the Cobalt-rule run, at blocks **51,894,041** to **51,894,088**. Each test creates USDC only in local fork storage and acquires every B20 through its actual Slipstream pool. No B20 balance or code is fabricated, and nothing is broadcast.
 
-- **Round trip** (`testBaseNativeB20BootstrapAndUSDCRoundTrip`). A seed of 100 USDC per stock, an equal-dollar fixture, bootstrapped the vault. The fee-free gateway minted 100 M7 for **70.000076 USDC** and redeemed them for **69.930045 USDC**; the difference is pool pricing. Assertions cover shares, refunds, the vault's backing, the gateway holding nothing afterwards, and cleared allowances.
-- **Reset** (`testBaseNativeResetToEqualWeightsThroughLivePools`). A seed holding twice as much AAPLc by value as each other stock is reset to equal weights through the live pinned pools, in the next weekday execution window. Feeds are mocked only to report their fork-time answers as fresh. At block 51,883,777 it made seven trades using 1.16M gas: it sold $128.64 of AAPLc and bought $128.42 of the other six, paid the caller a $0.06 reward (0.5 bp), and the vault's $1,199.75 became $1,199.51 including the reward, within the 1% bound.
-- **Price per share** (`testBaseNativeLensPricesShares`). `M7Lens` values a seed bought for 700 USDC at **$0.6998** per share from the live feeds, while its stalest price was 12 hours old.
+- **Round trip** (`testBaseNativeB20BootstrapAndUSDCRoundTrip`). A seed of 100 USDC per stock, an equal-dollar fixture, bootstrapped the vault. The fee-free gateway minted 100 M7 for **70.000054 USDC** and redeemed them for **69.930015 USDC**; the difference is pool pricing. Assertions cover shares, refunds, the vault's backing, the gateway holding nothing afterwards, and cleared allowances.
+- **Reset** (`testBaseNativeResetToEqualWeightsThroughLivePools`). A seed holding twice as much AAPLc by value as each other stock is reset to equal weights through the live pinned pools, in the next weekday execution window, including the check of each pool against its 10-minute average. Feeds are mocked only to report their fork-time answers as fresh. At block 51,894,072 one tranche made seven trades using 1.29M gas: it sold $127.95 of AAPLc and bought $128.02 of the other six, and paid the caller a $0.064 reward, 5 bp of the value traded. The vault's $1,199.95 became $1,200.11 including the reward: the pools filled slightly better than the oracle.
+- **Price per share** (`testBaseNativeLensPricesShares`). `M7Lens` values a seed bought for 700 USDC at **$0.7002** per share from the live feeds, while its stalest price was 18 hours old.
 - **Policies and exits** (`testBaseNativeTransferGasAndResilientRedemption`). M7 transfers against the real policy registry cost about 52k gas to a new holder and 28k to an existing one. These are measured inside one test transaction; a standalone transfer also pays cold account access. `redeemBasketWithClaims` delivered every leg, with no claims.
 
 `script/rehearse.sh` also ran the mainnet runbook end to end on a local base-anvil fork under both rule sets:
 - deploy, and 63 deployment checks with bytecode matching the build;
-- an equal-dollar seed worth 1,000 USDC at oracle prices, bought for 999.21 USDC;
+- an equal-dollar seed worth 1,000 USDC at oracle prices, bought for 999.74 USDC;
 - bootstrap, and 84 post-bootstrap checks;
 - gateway and in-kind smoke tests;
 - the reset status check and the monitor;
 - the first reset with the runbook's `Rebalance` script. The rehearsal ran outside the execution window, so the valuation refused it (`OutsideExecutionWindow`) and nothing changed.
+
+The third review's live-pool regressions (`test/Audit3Fork.t.sol`) also pass under both rule sets, at the blocks the review recorded its findings. A sandwich of the reset no longer pays: each attempt that executed lost the attacker money, and larger pushes were refused. A $182k TSLAc sale completes in 19 tranches, and a $900k vault with two stocks 42% under target in 15.
 
 An earlier, cap-weighted design's round trip had passed at block 51,830,602 with base-anvil v1.1.0. The machine-readable record is `config/base.json` → `native_fork_verification`. The tests are opt-in (`BASE_FORK_TEST=true`, `FOUNDRY_BASE=beryl|cobalt`) and need the Base-specific `forge`; the ordinary suite skips them. Still unvalidated: production addresses, anything with live funds, and the runbook's reset script inside a live execution window.
 

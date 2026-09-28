@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAggregatorV3, ICoinbaseOracleRegistry} from "../../src/Valuation.sol";
 import {Swap} from "../../src/Types.sol";
 import {B20PolicyMixin} from "./PolicyMocks.sol";
+import {PoolOracleMock} from "./PoolOracleMock.sol";
 
 contract ControllerToken is ERC20, B20PolicyMixin {
     uint8 private immutable _decimals;
@@ -79,8 +80,9 @@ contract ControllerRegistry is ICoinbaseOracleRegistry {
 
 /// @dev Test-only vault double for the controller. Each leg converts at fair value from the live mock feeds,
 ///      scaled by `outputBps`. Optional scripted balances, dilution and a mid-execution feed change let the
-///      controller's postconditions be tested adversarially.
-contract ControllerVault is ERC20 {
+///      controller's postconditions be tested adversarially. It is also its own factory and every stock's pool,
+///      reporting steady pool prices unless a test moves its ticks.
+contract ControllerVault is ERC20, PoolOracleMock {
     IERC20[8] private _assets;
     ControllerFeed[8] private _feeds;
     uint256[8] public afterBalances;
@@ -105,6 +107,18 @@ contract ControllerVault is ERC20 {
 
     function backing(uint256 index) external view returns (uint256) {
         return _assets[index].balanceOf(address(this));
+    }
+
+    function factory() external view returns (address) {
+        return address(this);
+    }
+
+    function getPool(address, address, int24) external view returns (address) {
+        return address(this);
+    }
+
+    function tickSpacing(uint256) external pure returns (int24) {
+        return 1;
     }
 
     function LOCKED_SHARES() external pure returns (uint256) {

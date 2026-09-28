@@ -27,6 +27,7 @@ PREFLIGHT_INTERVAL_SECONDS = 3600
 LEVELS = ('info', 'action', 'critical')
 LATE_DAYS = 7
 DEADLINE_DAYS = 21
+RESET_SPACING = 30 * 86400
 WAD = 10**18
 
 
@@ -40,25 +41,38 @@ def quarter_end(quarter):
     return quarter_start(quarter + 1)
 
 
+def utc(timestamp):
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+
 def reset_status(rpc, controller, now):
-    """Alerts on this quarter's equal-weight reset: due, late, or close to the quarter's end."""
+    """Alerts on this quarter's equal-weight reset: due, in progress, late, or close to the quarter's end. The reset
+    runs in tranches at least 30 minutes apart, and opens 30 days after the previous quarter's completed."""
     quarter = rpc.call(controller, 'currentQuarter()')[0]
     done = rpc.call(controller, 'executedQuarter(uint32)', quarter)[0] == 1
+    last_tranche = rpc.call(controller, 'lastTrancheAt()')[0]
+    next_tranche = rpc.call(controller, 'nextTrancheAt()')[0]
+    opens = max(quarter_start(quarter), rpc.call(controller, 'lastCompletedAt()')[0] + RESET_SPACING)
     report = {'quarter': quarter, 'reset_done': done,
               'last_reset_quarter': rpc.call(controller, 'lastExecutedQuarter()')[0],
+              'last_tranche_at': utc(last_tranche) if last_tranche else None,
+              'next_tranche_at': utc(next_tranche),
               'quarter_ends_at': datetime.fromtimestamp(quarter_end(quarter), timezone.utc).isoformat()}
     alerts = []
     if not done:
-        days_in = (now - quarter_start(quarter)) // 86400
         days_left = (quarter_end(quarter) - now) // 86400
         if days_left <= DEADLINE_DAYS:
             # The message stays the same all quarter, so the alert repeats instead of resolving daily.
-            ends = datetime.fromtimestamp(quarter_end(quarter), timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
             alerts.append({'level': 'critical', 'message': 'The quarter ends at %s and its equal-weight reset '
-                           'has not run.' % ends})
-        elif days_in >= LATE_DAYS:
-            alerts.append({'level': 'action', 'message': "This quarter's equal-weight reset has not run; anyone can "
-                           'trigger it on a weekday between 15:00 and 20:00 UTC.'})
+                           'has not completed.' % utc(quarter_end(quarter))})
+        elif now >= opens and (now - opens) // 86400 >= LATE_DAYS:
+            alerts.append({'level': 'action', 'message': "This quarter's equal-weight reset has not completed; "
+                           'anyone can run its next tranche on a weekday between 15:00 and 20:00 UTC, at least 30 '
+                           'minutes after the last.'})
+        elif now < opens:
+            alerts.append({'level': 'info', 'message': "This quarter's equal-weight reset opens at %s." % utc(opens)})
+        elif last_tranche >= opens:
+            alerts.append({'level': 'info', 'message': "This quarter's equal-weight reset is in progress."})
         else:
             alerts.append({'level': 'info', 'message': "This quarter's equal-weight reset is due."})
     return alerts, report
@@ -111,19 +125,20 @@ def vault_state(rpc, controller, vault, lens, state):
     supply = rpc.call(vault, 'totalSupply()')[0]
     backing = [rpc.call(vault, 'backing(uint256)', i)[0] for i in range(8)]
     reserved = [rpc.call(vault, 'reserved(uint256)', i)[0] for i in range(8)]
-    last_executed = rpc.call(controller, 'lastExecutedQuarter()')[0]
+    # Tranches sell some stocks; a new one between runs moves the baseline instead of alerting.
+    last_tranche = rpc.call(controller, 'lastTrancheAt()')[0]
     if lens:
         report.update(decode_value(rpc.call(lens, 'value()')))
     if supply:
         per_share = [b * WAD // supply for b in backing[:7]]
         previous = state.get('backing_per_share')
-        if previous and state.get('last_executed_quarter') == last_executed:
+        if previous and state.get('last_tranche_at') == last_tranche:
             fell = [SYMBOLS[i] for i in range(7) if per_share[i] < int(previous[i])]
             if fell:
-                alerts.append({'level': 'critical', 'message': 'Backing per share fell for %s outside a rebalance: '
+                alerts.append({'level': 'critical', 'message': 'Backing per share fell for %s outside a reset: '
                                'check for an issuer seizure or burn of vault holdings.' % ', '.join(fell)})
         state['backing_per_share'] = [str(x) for x in per_share]
-        state['last_executed_quarter'] = last_executed
+        state['last_tranche_at'] = last_tranche
         try:
             rpc.call(vault, 'quoteMint(uint256)', WAD)
         except ValueError as exc:

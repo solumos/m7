@@ -11,9 +11,10 @@ import {IM7Vault} from "../src/interfaces/IM7Vault.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../src/interfaces/ISlipstreamRouter.sol";
 import {PolicyRegistryMock} from "./mocks/PolicyMocks.sol";
 import {ControllerToken, ControllerFeed, ControllerRegistry} from "./mocks/ControllerMocks.sol";
+import {PoolOracleMock} from "./mocks/PoolOracleMock.sol";
 
 /// @dev A funded external venue: $100 stocks with 8 decimals exchange 1:1 raw units against 6-decimal USDC.
-contract IndexIntegrationRouter is ISlipstreamRouter, ISlipstreamFactory {
+contract IndexIntegrationRouter is ISlipstreamRouter, ISlipstreamFactory, PoolOracleMock {
     uint256 public calls;
     uint256 public secondTradeOutputBps = 10000;
     bool public failSecond;
@@ -100,23 +101,23 @@ contract IndexIntegrationTest is Test {
     }
 
     /// The 110/90 seed resets to equal value: stock 0 sells 10 tokens and stock 1 buys with the proceeds. Every stock
-    ///      also sells a seventh of the caller's $3.50 reward, so each ends at $9,999.50.
+    ///      also sells a seventh of the caller's $0.50 reward, 5 bp of the $1,000 traded, so each ends at $9,999.93.
     function testActualControllerAndVaultResetToEqualWeightsPermissionlessly() public {
         vm.prank(address(123));
         controller.rebalance(block.timestamp, address(123));
         assertEq(router.calls(), 7); // six sales, then one purchase
         for (uint256 i; i < 7; ++i) {
-            assertApproxEqAbs(assets[i].balanceOf(address(vault)), 99.995e8, 2);
+            assertApproxEqAbs(assets[i].balanceOf(address(vault)), 99.99928572e8, 10);
         }
         assertEq(assets[7].balanceOf(address(vault)), 0);
-        assertEq(assets[7].balanceOf(address(123)), 3.5e6); // 0.5 bp of $70,000
+        assertEq(assets[7].balanceOf(address(123)), 0.5e6); // 5 bp of the $1,000 traded
         assertEq(vault.totalSupply(), 1000e18);
         assertEq(assets[0].allowance(address(vault), address(router)), 0);
         assertEq(assets[7].allowance(address(vault), address(router)), 0);
         assertTrue(controller.executedQuarter(QUARTER));
         // Subsequent issuance uses the updated actual basket.
         uint256[8] memory contribution = vault.quoteMint(100e18);
-        assertApproxEqAbs(contribution[0], 9.9995e8, 1);
+        assertApproxEqAbs(contribution[0], 9.99992858e8, 1);
         vault.mintBasket(100e18, contribution, address(456), block.timestamp);
         assertEq(vault.balanceOf(address(456)), 100e18);
     }

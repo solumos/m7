@@ -91,6 +91,21 @@ contract ControllerPlannerTest is Test {
         controller.rebalance(block.timestamp, KEEPER);
     }
 
+    /// Tranches half an hour apart, feeds reported fresh each time, until the quarter's reset completes.
+    function _completeReset() private returns (uint256 tranches) {
+        uint32 quarter = controller.currentQuarter();
+        while (!controller.executedQuarter(quarter)) {
+            if (tranches != 0) {
+                vm.warp(block.timestamp + controller.TRANCHE_COOLDOWN());
+                for (uint256 i; i < 8; ++i) {
+                    feeds[i].set(feeds[i].answer(), block.timestamp);
+                }
+            }
+            _rebalance();
+            ++tranches;
+        }
+    }
+
     function _held() private view returns (uint256[8] memory held) {
         for (uint256 i; i < 8; ++i) {
             held[i] = vault.backing(i);
@@ -143,8 +158,9 @@ contract ControllerPlannerTest is Test {
         }
         assertTrue(buying);
         _assertEqualWeights(0.003e18);
-        // 0.5 bp of $1M is $50: the reward is capped at $25.
-        assertEq(assets[7].balanceOf(KEEPER), 25e6);
+        assertTrue(controller.executedQuarter(controller.currentQuarter()), "every trade fit in one tranche");
+        // 5 bp of the one-way traded value, about half of what the legs traded.
+        assertApproxEqRel(assets[7].balanceOf(KEEPER) * 1e12, _traded() * 5 / 20_000, 0.01e18);
     }
 
     function testFuzzResetStaysWithinLossComplianceAndCashBounds(uint256 entropy) public {
@@ -159,9 +175,13 @@ contract ControllerPlannerTest is Test {
             uint256(keccak256(abi.encode(entropy, "buy"))) % 31
         );
         (, uint256 navBefore) = _values();
-        _rebalance();
+        uint256[8] memory before = _held();
+        uint256 tranches = _completeReset();
         (, uint256 navAfter) = _values();
         uint256 reward = assets[7].balanceOf(KEEPER) * 1e12;
+        // No trade above the $10k cap: moves above it took several tranches.
+        _assertLegsCapped();
+        if (tranches > 1) assertGt(_largestMove(before), 9_990e18, "an extra tranche without a capped leg");
         assertLe(
             navBefore - Math.min(navBefore, navAfter),
             _traded() / 100 + reward + 1e15,
@@ -170,6 +190,31 @@ contract ControllerPlannerTest is Test {
         _assertEqualWeights(0.004e18); // compliance is 30 bp of quantity; pool deviation adds a little value noise
         (uint256[8] memory components,) = _values();
         assertLe(components[7], navAfter / 10_000 + 0.07e18, "undeployed cash");
+    }
+
+    /// Sales stay within the $10k cap. Purchases spend the tranche's cash, so sales filled above the oracle can lift
+    /// them slightly over it; the pools here sit at most 0.4% above.
+    function _assertLegsCapped() private view {
+        for (uint256 k; k < venue.callCount(); ++k) {
+            PricedVenue.Call memory call = venue.callAt(k);
+            if (call.tokenIn == address(assets[7])) {
+                assertLe(call.amountIn * 1e12, 10_050e18, "a purchase above the $10k cap");
+            }
+            for (uint256 i; i < 7; ++i) {
+                if (call.tokenIn == address(assets[i])) {
+                    assertLe(call.amountIn * prices[i] * 1e6, 10_000e18, "a sale above the $10k cap");
+                }
+            }
+        }
+    }
+
+    /// The oracle value of the largest single-stock move between `before` and now.
+    function _largestMove(uint256[8] memory before) private view returns (uint256 largest) {
+        uint256[8] memory held = _held();
+        for (uint256 i; i < 7; ++i) {
+            uint256 moved = held[i] > before[i] ? held[i] - before[i] : before[i] - held[i];
+            largest = Math.max(largest, moved * prices[i] * 1e6);
+        }
     }
 
     function testLossyVenueRevertsAtomically() public {

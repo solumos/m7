@@ -3,12 +3,13 @@ pragma solidity 0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISlipstreamRouter, ISlipstreamFactory} from "../../src/interfaces/ISlipstreamRouter.sol";
+import {PoolOracleMock} from "./PoolOracleMock.sol";
 
 /// @dev A funded venue quoting each stock at a fixed USDC rate, with optional per-direction haircuts kept by the
 ///      venue. Like the deployed Slipstream SwapRouter (0x698C...A92F), both single-hop swaps end with refundETH():
 ///      the router's entire ETH balance goes to msg.sender and the swap reverts with "STE" if that transfer fails.
 ///      unwrapWETH9 is payable and does nothing without WETH, as on the live router.
-contract PricedVenue is ISlipstreamRouter, ISlipstreamFactory {
+contract PricedVenue is ISlipstreamRouter, ISlipstreamFactory, PoolOracleMock {
     struct Call {
         address tokenIn;
         address tokenOut;

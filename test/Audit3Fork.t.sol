@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {M7Vault} from "../src/M7Vault.sol";
 import {IndexController} from "../src/IndexController.sol";
 import {Valuation, IAggregatorV3, ICoinbaseOracleRegistry} from "../src/Valuation.sol";
@@ -64,7 +65,8 @@ contract ResetSandwich {
     }
 }
 
-/// @dev Third review (docs/AUDIT-3.md), against live Base pools with native B20 execution. Opt in like BaseForkTest:
+/// @dev Third review (docs/AUDIT-3.md): its live-pool reproductions, converted to regression tests of the fixed reset,
+///      against live Base pools with native B20 execution. Opt in like BaseForkTest:
 ///      BASE_FORK_TEST=true, Base's forge and FOUNDRY_BASE=beryl|cobalt. Only USDC is dealt; every stock is bought from
 ///      its pinned pool. After the seed purchases, each stock feed is mocked to report its pool's own mid price (and
 ///      USDC exactly $1), so every reset starts from pools that agree with the oracle.
@@ -80,105 +82,108 @@ contract Audit3ForkTest is VaultHarness {
     uint256 constant CAPACITY_BLOCK = 51_891_137;
     uint256 constant COMPLIANCE_BLOCK = 51_888_052;
 
-    /// L-01: a caller wraps the reset in its own transaction. At $300k of NAV, AAPLc is overweight and METAc and TSLAc
-    /// are 42% under their equal-weight value, so the reset sells AAPLc and buys about $18k of each. Pushing the METAc
-    /// and TSLAc pools up first makes the vault buy dearer within its 1% bound; selling back afterwards returns the
-    /// attacker's capital, plus or minus the result, which the log reports for six front-run sizes.
-    function testAudit3CallerSandwichesTheResetInOneTransaction() public {
-        bool pinned = _startFork(SANDWICH_BLOCK);
-        uint256 scale = 1;
-        IndexController controller = _deployFixtureController();
-        M7Vault vault = M7Vault(payable(address(controller.vault())));
+    /// E-01 regression: the same $300k vault and front-runs as the review, at the same block. Before the fix, pushing
+    /// TSLAc with $40k took $67.62 from holders and METAc $50k plus TSLAc $40k took $128.16. Now a push beyond 25 ticks
+    /// of a pool's 10-minute average makes the tranche revert `PoolMoved`, and a smaller one can only worsen a trade of
+    /// at most $10k by 25 ticks: every sandwich that still executes costs the attacker more than holders lose.
+    function testAudit3SandwichIsRefusedOrUnprofitable() public {
+        _startFork(SANDWICH_BLOCK);
+        (IndexController controller, M7Vault vault) = _sandwichFixture();
+        uint256 snap = vm.snapshotState();
+        uint256 keeperBefore = vault.assets(7).balanceOf(KEEPER); // the address holds USDC on mainnet
+        controller.rebalance(block.timestamp + 1 hours, KEEPER);
+        uint256 honest = _nav(controller.valuation(), vault, controller.valuation().snapshot());
+        uint256 reward = vault.assets(7).balanceOf(KEEPER) - keeperBefore;
+        emit log_named_decimal_uint("Honest first tranche: NAV after (USD)", honest, 18);
+        emit log_named_decimal_uint("  reward (USDC)", reward, 6);
+
+        uint256[2][8] memory frontRuns = [
+            [uint256(0), 2_000e6],
+            [uint256(0), 5_000e6],
+            [uint256(0), 10_000e6],
+            [uint256(0), 20_000e6],
+            [uint256(0), 40_000e6],
+            [uint256(10_000e6), 10_000e6],
+            [uint256(50_000e6), 40_000e6],
+            [uint256(90_000e6), 50_000e6]
+        ];
+        for (uint256 k; k < frontRuns.length; ++k) {
+            vm.revertToState(snap);
+            _logSandwich(controller, vault, frontRuns[k], honest, reward);
+        }
+        // Pushing METAc as well moves its pool beyond 25 ticks: those tranches are refused.
+        for (uint256 k = 6; k < 8; ++k) {
+            vm.revertToState(snap);
+            (bool ran,, bytes memory reason) = _attack(controller, vault, frontRuns[k]);
+            assertFalse(ran);
+            assertEq(bytes4(reason), IndexController.PoolMoved.selector);
+        }
+    }
+
+    /// $300k with AAPLc overweight and METAc and TSLAc 42% under target, feeds at the pools' mid prices.
+    function _sandwichFixture() private returns (IndexController controller, M7Vault vault) {
+        controller = _deployFixtureController();
+        vault = M7Vault(payable(address(controller.vault())));
         // AAPLc, AMZNc, GOOGLc, METAc, MSFTc, NVDAc, TSLAc
         uint256[7] memory spend =
             [uint256(90_000e6), 40_000e6, 40_000e6, 25_000e6, 40_000e6, 40_000e6, 25_000e6];
-        for (uint256 i; i < 7; ++i) {
-            spend[i] *= scale;
+        vault.bootstrap(_buyWeighted(vault, spend), address(this));
+        vm.warp(_nextWindow());
+        _reportPoolMidAsFeeds(controller.valuation(), vault);
+        emit log_named_decimal_uint(
+            "NAV before (USD)", _nav(controller.valuation(), vault, controller.valuation().snapshot()), 18
+        );
+    }
+
+    function _logSandwich(
+        IndexController controller,
+        M7Vault vault,
+        uint256[2] memory frontRun,
+        uint256 honest,
+        uint256 reward
+    ) private {
+        (bool ran, int256 profit, bytes memory reason) = _attack(controller, vault, frontRun);
+        emit log_named_uint("Front-run METAc (USDC)", frontRun[0] / 1e6);
+        emit log_named_uint("Front-run TSLAc (USDC)", frontRun[1] / 1e6);
+        if (!ran) {
+            emit log_named_bytes("  reverted", reason);
+            return;
         }
+        uint256 navAfter = _nav(controller.valuation(), vault, controller.valuation().snapshot());
+        int256 trading = profit - int256(reward);
+        uint256 extraLoss = honest - Math.min(honest, navAfter);
+        emit log_named_decimal_int("  attacker result excluding the reward (USDC)", trading, 6);
+        emit log_named_decimal_uint("  holders' extra loss vs honest (USD)", extraLoss, 18);
+        assertLt(trading, 0, "a sandwich still pays");
+        assertLe(extraLoss, 25e18, "more than 25 bp of two $10k trades");
+    }
+
+    /// E-02 regression: the $182k TSLAc sale that could not execute now completes in tranches of at most $10k per
+    /// trade. On a fork nothing arbitrages the pools between tranches, so before each one the oracle is set to the
+    /// pools' mid prices, as arbitrage keeps them aligned on mainnet.
+    function testAudit3LargeSaleCompletesInTranches() public {
+        _startFork(CAPACITY_BLOCK);
+        IndexController controller = _deployFixtureController();
+        M7Vault vault = M7Vault(payable(address(controller.vault())));
+        uint256[7] memory spend =
+            [uint256(40_000e6), 40_000e6, 40_000e6, 40_000e6, 40_000e6, 40_000e6, 250_000e6];
         vault.bootstrap(_buyWeighted(vault, spend), address(this));
         vm.warp(_nextWindow());
         Valuation valuation = controller.valuation();
         _reportPoolMidAsFeeds(valuation, vault);
-        uint256[8] memory prices = valuation.snapshot();
-        uint256 navBefore = _nav(valuation, vault, prices);
-        emit log_named_decimal_uint("NAV before (USD)", navBefore, 18);
-        emit log_named_decimal_uint("METAc to buy (USD)", _deficit(valuation, vault, prices, META), 18);
-        emit log_named_decimal_uint("TSLAc to buy (USD)", _deficit(valuation, vault, prices, TSLA), 18);
-
-        uint256 snap = vm.snapshotState();
-        controller.rebalance(block.timestamp + 1 hours, KEEPER);
-        uint256 honest = _nav(valuation, vault, prices);
-        emit log_named_decimal_uint("Honest reset: NAV after (USD)", honest, 18);
-
-        uint256[2][6] memory frontRuns = [
-            [uint256(0), 20_000e6],
-            [uint256(0), 40_000e6],
-            [uint256(0), 80_000e6],
-            [uint256(50_000e6), 40_000e6],
-            [uint256(100_000e6), 80_000e6],
-            [uint256(200_000e6), 160_000e6]
-        ];
-        bool anyRan;
-        int256 bestProfit;
-        for (uint256 k; k < frontRuns.length; ++k) {
-            vm.revertToState(snap);
-            frontRuns[k][0] *= scale;
-            frontRuns[k][1] *= scale;
-            (bool ran, int256 profit, uint256 navAfter) =
-                _sandwich(controller, vault, valuation, prices, frontRuns[k]);
-            emit log_named_uint("Front-run METAc (USDC)", frontRuns[k][0] / 1e6);
-            emit log_named_uint("Front-run TSLAc (USDC)", frontRuns[k][1] / 1e6);
-            if (!ran) {
-                emit log("  the reset's 1% minimum held: the whole transaction reverted");
-                continue;
-            }
-            anyRan = true;
-            if (profit > bestProfit) bestProfit = profit;
-            emit log_named_decimal_int("  attacker profit incl. reward (USDC)", profit, 6);
-            emit log_named_decimal_uint(
-                "  holders' extra loss vs honest (USD)", honest - Math.min(honest, navAfter), 18
-            );
-            assertLt(navAfter, honest, "a sandwiched reset leaves holders with less");
-        }
-        assertTrue(anyRan, "the reset can be wrapped by the caller");
-        if (pinned) assertGt(bestProfit, 15e6, "profitable beyond the reward at the recorded block");
+        emit log_named_decimal_uint(
+            "TSLAc to sell (USD)", _surplus(valuation, vault, valuation.snapshot(), TSLA), 18
+        );
+        uint256 tranches = _completeInTranches(controller, vault, valuation);
+        emit log_named_uint("Tranches", tranches);
+        assertGe(tranches, 18);
+        _assertEqualValue(vault, valuation);
     }
 
-    /// M-02: the reset executes every leg in one transaction through one pool per stock, so its capacity is the pool's
-    /// depth within 1%. A TSLAc overweight that needs a sale of about $180k cannot execute, retrying cannot help while
-    /// the imbalance lasts, and the whole quarter's reset is blocked. A $51k sale of the same pool fits.
-    function testAudit3ResetLegBeyondPoolDepthBlocksTheQuarter() public {
-        _startFork(CAPACITY_BLOCK);
-        uint256 fresh = vm.snapshotState();
-        uint256[2] memory tslaSpend = [uint256(100_000e6), 250_000e6];
-        for (uint256 k; k < 2; ++k) {
-            IndexController controller = _deployFixtureController();
-            M7Vault vault = M7Vault(payable(address(controller.vault())));
-            uint256[7] memory spend = [uint256(40_000e6), 40_000e6, 40_000e6, 40_000e6, 40_000e6, 40_000e6, 0];
-            spend[TSLA] = tslaSpend[k];
-            vault.bootstrap(_buyWeighted(vault, spend), address(this));
-            vm.warp(_nextWindow());
-            Valuation valuation = controller.valuation();
-            _reportPoolMidAsFeeds(valuation, vault);
-            uint256[8] memory prices = valuation.snapshot();
-            emit log_named_decimal_uint("TSLAc to sell (USD)", _surplus(valuation, vault, prices, TSLA), 18);
-            try controller.rebalance(block.timestamp + 1 hours, KEEPER) {
-                emit log("  reset executed");
-                assertEq(k, 0, "the smaller leg fits");
-            } catch (bytes memory reason) {
-                emit log_named_string("  reset reverted", _reason(reason));
-                assertEq(k, 1, "only the larger leg fails");
-                assertTrue(controller.rebalanceDue(), "the quarter's reset is still undone");
-            }
-            vm.revertToState(fresh);
-        }
-    }
-
-    /// M-01 (compliance part): the same skew at $900k of NAV. The reset must buy about $54k each of METAc and TSLAc,
-    /// 42% of their final holdings. Their own price impact leaves them more than 30 bp short of target, so the honest
-    /// reset reverts with NotCompliant although every leg met its 1% minimum.
-    function testAudit3LargePurchasesFailComplianceOnLivePools() public {
-        if (!_startFork(COMPLIANCE_BLOCK)) return; // the outcome depends on the pools' state at that block
+    /// E-02 regression: the $900k vault with METAc and TSLAc 42% under target, which failed `NotCompliant`, now
+    /// completes in tranches.
+    function testAudit3LargePurchasesCompleteInTranches() public {
+        _startFork(COMPLIANCE_BLOCK);
         IndexController controller = _deployFixtureController();
         M7Vault vault = M7Vault(payable(address(controller.vault())));
         uint256[7] memory spend =
@@ -187,39 +192,85 @@ contract Audit3ForkTest is VaultHarness {
         vm.warp(_nextWindow());
         Valuation valuation = controller.valuation();
         _reportPoolMidAsFeeds(valuation, vault);
-        uint256[8] memory prices = valuation.snapshot();
-        emit log_named_decimal_uint("NAV (USD)", _nav(valuation, vault, prices), 18);
-        emit log_named_decimal_uint("METAc to buy (USD)", _deficit(valuation, vault, prices, META), 18);
-        emit log_named_decimal_uint("TSLAc to buy (USD)", _deficit(valuation, vault, prices, TSLA), 18);
-        vm.expectRevert(IndexController.NotCompliant.selector);
-        controller.rebalance(block.timestamp + 1 hours, KEEPER);
-        assertTrue(controller.rebalanceDue());
+        uint256 tranches = _completeInTranches(controller, vault, valuation);
+        emit log_named_uint("Tranches", tranches);
+        assertGe(tranches, 5);
+        _assertEqualValue(vault, valuation);
     }
 
     // ------------------------------------------------------------------ helpers
 
-    function _sandwich(
-        IndexController controller,
-        M7Vault vault,
-        Valuation valuation,
-        uint256[8] memory prices,
-        uint256[2] memory frontRun
-    ) private returns (bool ran, int256 profit, uint256 navAfter) {
+    function _attack(IndexController controller, M7Vault vault, uint256[2] memory frontRun)
+        private
+        returns (bool ran, int256 profit, bytes memory reason)
+    {
         IERC20 usdc = vault.assets(7);
         ResetSandwich attacker = new ResetSandwich(vault.router(), usdc);
         uint256 capital = frontRun[0] + frontRun[1] + 1e6;
         deal(address(usdc), address(attacker), capital);
-        IERC20[] memory stocks = new IERC20[](2);
-        int24[] memory spacings = new int24[](2);
-        uint256[] memory amounts = new uint256[](2);
-        (stocks[0], stocks[1]) = (vault.assets(META), vault.assets(TSLA));
-        (spacings[0], spacings[1]) = (vault.tickSpacing(META), vault.tickSpacing(TSLA));
-        (amounts[0], amounts[1]) = (frontRun[0], frontRun[1]);
+        (IERC20[] memory stocks, int24[] memory spacings, uint256[] memory amounts) = _legs(vault, frontRun);
         try attacker.run(controller, stocks, spacings, amounts) {
             ran = true;
             profit = int256(usdc.balanceOf(address(attacker))) - int256(capital);
-            navAfter = _nav(valuation, vault, prices);
-        } catch {}
+        } catch (bytes memory why) {
+            reason = why;
+        }
+    }
+
+    function _legs(M7Vault vault, uint256[2] memory frontRun)
+        private
+        view
+        returns (IERC20[] memory stocks, int24[] memory spacings, uint256[] memory amounts)
+    {
+        stocks = new IERC20[](2);
+        spacings = new int24[](2);
+        amounts = new uint256[](2);
+        (stocks[0], stocks[1]) = (vault.assets(META), vault.assets(TSLA));
+        (spacings[0], spacings[1]) = (vault.tickSpacing(META), vault.tickSpacing(TSLA));
+        (amounts[0], amounts[1]) = (frontRun[0], frontRun[1]);
+    }
+
+    /// Tranches until the quarter's reset completes, each half an hour after the last within the execution window,
+    /// with the oracle set to the pools' mid prices before each. Every sale stays within the $10k cap.
+    function _completeInTranches(IndexController controller, M7Vault vault, Valuation valuation)
+        private
+        returns (uint256 tranches)
+    {
+        // An unfinished reset carries on into the next quarter, whose first tranche continues the same work.
+        while (!controller.executedQuarter(controller.currentQuarter())) {
+            if (tranches != 0) {
+                uint256 t = block.timestamp + controller.TRANCHE_COOLDOWN();
+                if (t % 1 days >= 20 hours) t = (t / 1 days + 1) * 1 days + 15 hours;
+                while ((t / 1 days + 4) % 7 == 0 || (t / 1 days + 4) % 7 == 6) {
+                    t += 1 days;
+                }
+                vm.warp(t);
+                _reportPoolMidAsFeeds(valuation, vault);
+            }
+            vm.recordLogs();
+            controller.rebalance(block.timestamp + 1 hours, KEEPER);
+            ++tranches;
+            _assertSalesCapped(vm.getRecordedLogs(), valuation.snapshot());
+            assertLt(tranches, 40, "the reset does not converge");
+        }
+    }
+
+    function _assertSalesCapped(Vm.Log[] memory logs, uint256[8] memory prices) private pure {
+        for (uint256 k; k < logs.length; ++k) {
+            if (logs[k].topics[0] != M7Vault.RebalanceLeg.selector) continue;
+            uint256 tokenIn = uint256(logs[k].topics[1]);
+            if (tokenIn == 7) continue;
+            (uint256 amountIn,) = abi.decode(logs[k].data, (uint256, uint256));
+            assertLe(amountIn * prices[tokenIn] / 1e8, 10_000e18, "a sale above the $10k cap");
+        }
+    }
+
+    function _assertEqualValue(M7Vault vault, Valuation valuation) private view {
+        uint256[8] memory prices = valuation.snapshot();
+        uint256 first = vault.backing(0) * prices[0] / 1e8;
+        for (uint256 i = 1; i < 7; ++i) {
+            assertApproxEqRel(vault.backing(i) * prices[i] / 1e8, first, 0.004e18, "not equal value");
+        }
     }
 
     function _nav(Valuation valuation, M7Vault vault, uint256[8] memory prices)

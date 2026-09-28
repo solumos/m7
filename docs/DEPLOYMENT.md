@@ -199,7 +199,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
      --sender "$ME" --broadcast --gas-estimate-multiplier 200
    ```
 
-   The seed is already close to equal value, so expect little or no trading; `rebalanceDue()` becomes false. A revert changes nothing (`OutsideExecutionWindow`, `NoFreshMarketSignal`, `Too little received`, `NotCompliant`); retry later.
+   The seed is already at equal value, so this first call trades nothing and completes the quarter: the script prints `Reset complete`, and `rebalanceDue()` becomes false. A revert changes nothing (`OutsideExecutionWindow`, `NoFreshMarketSignal`, `Too little received`, `PoolMoved`); retry later. The next quarter's reset opens 30 days after this one completed.
 
 6. Commit `config/seed.json` and `deployments/base-mainnet.json`, then tag the deployed commit and push the tag: `git tag -a v1.0.0 <commit in deployments/base-mainnet.json> && git push origin v1.0.0`.
 
@@ -214,15 +214,15 @@ Once the smoke tests pass and the monitor is running, publish:
 
 ## Phase 4: the quarterly reset
 
-Each calendar quarter, anyone triggers the reset once, on a weekday between 15:00 and 20:00 UTC. Once the vault is large enough, the reward (0.5 bp of NAV, up to $25) should attract others to do it; until then, run the `Rebalance` script above yourself early in the quarter. The monitor alerts when a quarter's reset is still undone a week in, and as critical with 21 days or fewer left. If a whole quarter passes without a reset, nothing breaks: the basket keeps its quantities until the next one.
+Each calendar quarter, anyone may run the reset, on weekdays between 15:00 and 20:00 UTC, in tranches at least 30 minutes apart. Each tranche trades at most about $10,000 per stock and the script says whether the quarter completed or when the next tranche may start: run it again until it prints `Reset complete`. A small vault completes in one tranche; in a volatile quarter a $1M vault takes a handful. Once the vault is large enough, the reward (5 bp of each tranche's traded value, up to $25) should attract others to do it; until then, run the `Rebalance` script above yourself early in the quarter. The monitor reports a reset in progress, alerts when a quarter's reset is still incomplete a week after it opens, and as critical with 21 days or fewer left. If a quarter ends first, nothing breaks: the next quarter's tranches continue it, and the basket keeps its quantities meanwhile.
 
 ## Monitoring
 
 `scripts/monitor.py` runs every 15 minutes from a systemd timer on an always-on Linux server. It:
-- checks whether this quarter's reset has run;
+- checks whether this quarter's reset has completed, is in progress, or has yet to open;
 - records the price per share and weights from the lens in `price-history.jsonl` beside its state file;
 - alerts if backing per share falls outside a reset (an issuer seizure or burn), if new minting is blocked, or if deferred claims are outstanding;
-- runs the `verify_base.py` read checks hourly, with the vault and gateway as policy accounts;
+- runs the `verify_base.py` read checks hourly, with the vault and gateway as policy accounts, including that every pinned pool keeps the 300 price observations the reset's 10-minute average needs;
 - posts new alerts to a Slack or Discord webhook;
 - repeats open critical alerts every six hours and announces cleared ones;
 - pings a heartbeat URL after every successful run.
@@ -257,24 +257,27 @@ For the heartbeat, create a check (for example on healthchecks.io) that expects 
 
 | Level | Examples | Response |
 |---|---|---|
-| critical | 21 days or fewer left without a reset; backing per share fell; minting blocked; failed preflight reads | Act now: see the playbook |
-| action | the reset still undone a week into the quarter; deferred claims outstanding | Run the reset, or look into the frozen asset |
-| info | the reset is due early in the quarter | None |
+| critical | 21 days or fewer left without a completed reset; backing per share fell; minting blocked; failed preflight reads | Act now: see the playbook |
+| action | the reset still incomplete a week after it opened; deferred claims outstanding | Run its next tranche, or look into the frozen asset |
+| info | the reset is due, in progress, or opens on a given date | None |
 
 ## Incident playbook
 
 **Reset keeps reverting.** The revert names the gate:
 - `OutsideExecutionWindow`: wait for a weekday 15:00–20:00 UTC.
+- `TooSoon`: the last tranche was under 30 minutes ago, or the last completed reset under 30 days ago; see `nextTrancheAt()`.
 - `NoFreshMarketSignal` or `UnavailablePrice`: the market is closed or a feed is stale; retry on the next trading day.
 - `CorporateAction`: an issuer paused a reference price; wait for it to resume.
+- `PoolMoved(i)`: stock `i`'s pool sits more than 25 ticks against the vault from its 10-minute average, perhaps pushed by someone else's transaction; retry in a few minutes.
+- `PoolUnavailable(i)`: stock `i`'s pool cannot report its 10-minute average; check its observations with `verify_base.py`. Anyone can call the pool's `increaseObservationCardinalityNext` to keep more.
 - `Too little received`: a pool sits more than 1% from its oracle price; retry later, and check that pool's depth with `verify_base.py`.
-- `NotCompliant` or `ExcessTurnover`: an unusual move; retry later in the quarter.
+- `NotCompliant`: a stock would end further from its target than it started, which only an unusual fill causes; retry later.
 
-None of these changes anything, and a missed quarter only means the basket keeps its quantities.
+None of these changes anything, and an unfinished quarter only means the basket keeps its quantities until later tranches.
 
 **Backing per share fell.** Minting, redeeming and claims never lower it, so a fall outside a reset means an issuer seized or burned vault holdings. Check the stock's `Transfer` events from the vault and the issuer's announcements. Claims are paid before holders, so holders absorb the loss.
 
-**Minting blocked.** An issuer seizure pushed a stock below the vault's precision floor. Redemptions still work, and the next reset rebuilds the stock.
+**Minting blocked.** An issuer seizure pushed a stock below the vault's precision floor. Redemptions still work, and the next reset's tranches rebuild the stock.
 
 **Preflight failure.** The message names the check:
 - a paused stock or issuer feed;

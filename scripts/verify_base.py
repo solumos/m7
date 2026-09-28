@@ -14,6 +14,9 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 SYMBOLS = ('AAPLc', 'AMZNc', 'GOOGLc', 'METAc', 'MSFTc', 'NVDAc', 'TSLAc')
+# IndexController.POOL_TWAP_WINDOW, and the observations it needs at one per 2-second block.
+POOL_TWAP_WINDOW = 600
+MIN_POOL_OBSERVATIONS = 300
 
 
 def request(url, payload=None):
@@ -155,6 +158,11 @@ def verify(manifest, rpc_url, accounts=()):
         require(pair == {token.lower(), manifest['usdc']['address'].lower()}, 'Pool assets mismatch')
         liquidity = rpc.call(pool, 'liquidity()')[0]
         require(liquidity > 0, 'No active pool liquidity')
+        # The reset compares each pool's price with its own 10-minute average: that needs one observation per block
+        # for 300 blocks, and a working oracle.
+        cardinality = rpc.call(pool, 'slot0()')[3]
+        require(cardinality >= MIN_POOL_OBSERVATIONS, stock['symbol'] + ': pool keeps too few price observations')
+        rpc.call(pool, 'observe(uint32[])', 0x20, 2, POOL_TWAP_WINDOW, 0)
         policies = {}
         for scope in ('TRANSFER_SENDER_POLICY', 'TRANSFER_RECEIVER_POLICY', 'TRANSFER_EXECUTOR_POLICY'):
             scope_hash = rpc.call(token, scope + '()')[0]
@@ -167,7 +175,7 @@ def verify(manifest, rpc_url, accounts=()):
                         stock['symbol'] + ': policy rejects ' + account)
         feed = feed_data(stock, manifest['risk_checks']['max_stock_feed_age_seconds'])
         return {**stock, 'feed_data': feed, 'multiplier_wad': str(multiplier),
-                'active_liquidity': str(liquidity), 'policy_ids': policies}
+                'active_liquidity': str(liquidity), 'observation_cardinality': cardinality, 'policy_ids': policies}
 
     with ThreadPoolExecutor(max_workers=7) as executor:
         report['stocks'] = list(executor.map(stock_check, manifest['stocks']))

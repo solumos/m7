@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Read-only check of a deployed M7 system: once before any funds go in, and again after the bootstrap.
 
-Compares every constructor-set value of the four contracts with config/base.json, the environment and the exact
-bytes of docs/METHODOLOGY.md, checks the contracts are bound to each other, and compares their runtime bytecode
-with the local build artifacts (immutables and compiler metadata masked). Optionally writes the deployment
-record. No keys, signatures, or transactions.
+Compares every constructor-set value of the five contracts with config/base.json and the deployer, checks the
+contracts are bound to each other, and compares their runtime bytecode with the local build artifacts (immutables and
+compiler metadata masked), which also covers every constant of the reset. Optionally writes the deployment record.
+No keys, signatures, or transactions.
 """
 import argparse
 import json

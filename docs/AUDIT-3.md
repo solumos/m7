@@ -9,7 +9,7 @@ Reviewed commit [`54b02e8`](https://github.com/solumos/mag7/tree/54b02e8), the e
 - **E-01: anyone who triggers the reset can sandwich it inside their own transaction.** On live Base pools, with a $300k vault, an attacker made up to $53 while holders lost $128 more than in an honest reset (4.3 bp of NAV). At a block 105 minutes earlier, with different pool liquidity, the same attack lost money.
 - **E-02: the reset cannot rebalance a large vault through today's pools.** Every trade goes through one pool per stock, all in one transaction. Large purchases also fail the 30 bp equal-weight check before they reach the 1% trade minimum. On live pools, a $900k vault with two stocks 42% underweight could not be reset at all, and neither could a vault that needed to sell $182k of TSLAc.
 
-**What this means for the launch.** At the planned $125 seed both are negligible. The sandwich is worth cents, below the pools' fees, and no trade comes near pool capacity. Both grow with the vault: E-01 is already profitable at $300k in some pool states, and E-02 binds from roughly $1–3M in a volatile quarter. The contracts are immutable and ownerless, so fixing either later means deploying new contracts and asking holders to move.
+**What this meant for the launch.** At the planned $125 seed both are negligible. The sandwich is worth cents, below the pools' fees, and no trade comes near pool capacity. Both grow with the vault: E-01 is already profitable at $300k in some pool states, and E-02 binds from roughly $1–3M in a volatile quarter. The contracts are immutable and ownerless, so fixing either after deployment would have meant new contracts and asking holders to move. All eight findings were therefore fixed before deployment; see [Remediation status](#remediation-status).
 
 | ID | Severity | Finding | Reproduction |
 | --- | --- | --- | --- |
@@ -22,7 +22,41 @@ Reviewed commit [`54b02e8`](https://github.com/solumos/mag7/tree/54b02e8), the e
 | E-07 | Informational | The reward and USDC legs skip the stocks' transfer policies; a reward sent to a contract that cannot move USDC is lost | Analysis |
 | E-08 | Informational | `verify_deployment.py` still describes the earlier design | Analysis |
 
-None of these is fixed in the reviewed commit. The tests reproduce the current behavior.
+## Remediation status
+
+After this review the reset was changed to fix every finding. The sections below describe the code as reviewed (`54b02e8`). Their reproduction tests were converted into regression tests that assert the fixed behavior.
+
+The reset now runs in **tranches**. Each call moves every stock the same fraction of the way to equal weight, with no sale worth more than about $10,000. Calls come at least 30 minutes apart, and the quarter completes once every stock is within 10 bp of equal value. Before trading, each pool the tranche uses must sit within 25 ticks (about 0.25%) of its own 10-minute time-weighted average in the vault's direction. Observations are written before a block's first swap, so a caller cannot move that average within its own transaction.
+
+| ID | Status | Fix | Regression tests |
+| --- | --- | --- | --- |
+| E-01 | Fixed | Pool check against each pool's 10-minute average; trades capped at about $10k per stock per tranche | `testAudit3PushedPoolRefusesTheTranche`; fork `testAudit3SandwichIsRefusedOrUnprofitable` |
+| E-02 | Fixed | Tranches sized to the $10k cap; a shortfall is allowed, as long as no stock moves away from its target | fork `testAudit3LargeSaleCompletesInTranches` and `testAudit3LargePurchasesCompleteInTranches`; `testAudit3LargePurchaseShortfallCompletesInALaterTranche`; `testHugeMovesProceedInCappedTranches` |
+| E-03 | Fixed | Turnover fence removed; the cap sizes every tranche | `testAudit3ElevenfoldMoveCompletesInTranches` |
+| E-04 | Fixed | The reward is 5 bp of the tranche's one-way traded value, at most $25. It is set aside from cash and paid only if a trade executed | `testAudit3TrancheThatTradesNothingPaysNothing`, `testRewardIsCappedAndCanBeDeclined` |
+| E-05 | Fixed | Nothing to compare counts as compliant | `testAudit3EveryStockBelowTheFloorHasNothingToTrade` |
+| E-06 | Fixed | A quarter's reset opens 30 days after the previous one completed | `testAudit3ResetsAreAtLeastThirtyDaysApart` |
+| E-07 | Fixed | The controller and valuation are refused as reward receivers | `testAudit3RewardSinksAreRefused` |
+| E-08 | Fixed | Description updated | — |
+
+**Re-verification on live Base.** The fixed code was re-run at the blocks each finding was recorded at.
+- **E-01:** the same $300k vault and front-runs. Every sandwich that still executed lost the attacker money: $1.92–29.57 beyond the reward it would have earned anyway. Holders' extra loss fell to $0.08–10.41 per tranche, from $15–128. Pushes that also moved METAc were refused with `PoolMoved`.
+- **E-02:** the $182k TSLAc sale completed in 19 tranches, and the $900k vault with two stocks 42% under target in 15.
+- **Everything else:**
+  - the native Base tests and the rehearsal pass under Beryl and Cobalt rules;
+  - `make check` passes: 118 Solidity and 31 Python tests;
+  - fuzzing passes at 10,000 runs;
+  - all five invariants pass at 2,048 runs of 64 calls;
+  - three 6,000-step seeded soaks pass.
+
+  The stateful campaign now also pushes pool prices and checks two more properties: every sale stays within the cap, and no trade goes through a pool pushed against the vault.
+
+**Residual risks after remediation:**
+- **Execution:** a caller can still move a pool up to 25 ticks against the vault before its call, and worsen each trade of at most $10k by that much, about $25. On the tested pools that cost the attacker more in fees than it gained. A provider holding most of a pool's in-range liquidity earns those fees back, so for them it can pay, within that bound.
+- **Speed:** the $10k cap keeps each tranche within today's pool depth. Resets of large vaults therefore take time: a volatile quarter needs about 50 tranches at $10M, a week at ten a day. Well beyond that, a quarter's reset may not complete within the quarter, and the next quarter continues it.
+- **New dependency:** the pool check needs each pinned pool to keep 300 price observations. All seven keep 360 or 2,048. The preflight checks this, and anyone can raise it.
+- **Keepers:** at 5 bp of the traded value, the reward does not attract keepers to a small vault, so the owner runs its tranches.
+- **Review:** the remediation has had no review other than this internal one, and there is no external audit.
 
 ## Method
 
@@ -138,6 +172,8 @@ The reward is decided by the deadband check, before trades are planned. Trades u
 `scripts/verify_deployment.py` says it checks "the four contracts" against "the exact bytes of docs/METHODOLOGY.md". It checks five contracts, and there is no methodology hash any more. Only the description is wrong.
 
 ## Verified properties
+
+These were verified on the reviewed commit, `54b02e8`. The fixed code's campaign checks the tranche equivalents, as listed under [Remediation status](#remediation-status).
 
 - **Stateful campaign** (`Audit3InvariantTest`): 2,048 runs of 64 calls per invariant (131,072 calls each), plus seeded soaks. Seed 42 (3,000 steps) made 595 reset attempts, 322 successful. Seed 7 (6,000 steps) made 1,197 attempts, 616 successful, 434 of them trading. No violation of:
   - backing per share never falling except through a reset or a seizure;

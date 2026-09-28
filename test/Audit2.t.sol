@@ -122,7 +122,7 @@ contract Audit2Test is Test {
         controller.rebalance(block.timestamp, address(0xBEEF));
         assertTrue(controller.executedQuarter(QUARTER));
         assertLe(assets[7].balanceOf(address(vault)), 7 * controller.MIN_LEG_USDC());
-        assertEq(assets[7].balanceOf(address(0xBEEF)), 3.50075e6); // 0.5 bp of $70,015
+        assertEq(assets[7].balanceOf(address(0xBEEF)), 0.0075e6); // 5 bp of the $15 invested
     }
 
     // Verified property: quarterAt agrees with an independent Gregorian algorithm.
