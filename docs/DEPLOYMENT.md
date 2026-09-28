@@ -42,12 +42,15 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
 ## Timeline (UTC)
 
+Updated September 28: the launch organizer chose to deploy now under Beryl, before Cobalt. The previous October 1 target was a sequencing precaution, not a contract restriction. Both Beryl and simulated Cobalt native integration tests have passed. Actual post-Cobalt validation remains a follow-up after activation. Preserve the contracts' existing feed-age and execution-window checks.
+
 | When | Phase |
 |---|---|
-| Now to Tue Sep 29 | Phase 0: preparation |
+| Mon Sep 28 | Phase 1: fresh Beryl preflight. Phase 2: deploy and verify source |
+| After deployment verification and usable seed feeds | Phase 3: seed, bootstrap and smoke tests |
+| Next weekday 15:00–20:00 execution window, with fresh market signal | First reset |
 | Wed Sep 30, 18:00 | Cobalt hard fork activates on Base mainnet |
-| Thu Oct 1 | Phase 1: go/no-go on post-Cobalt state. Phase 2: deploy |
-| Oct 1–2, US market hours | Phase 3: seed, bootstrap, smoke tests, first reset, announce |
+| After Cobalt activation | Repeat integration checks on actual post-upgrade state |
 | Every quarter | Phase 4: the quarterly reset |
 
 ## Phase 0: preparation
@@ -81,7 +84,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
 4. **Wallets and services.** Create and fund the roles above. Set `DEPLOYER`, `SEED_RECEIVER` and `SEED_USD` in `.env`. Set up the monitor server (see [Monitoring](#monitoring)) and test its webhook.
 
-## Phase 1: go/no-go after Cobalt (Oct 1)
+## Phase 1: go/no-go
 
 1. Predict the deployer's addresses. The deployer's nonce `N` must not change before the deploy:
 
@@ -100,7 +103,7 @@ set -a; . ./.env; set +a     # a copy of .env.example with real values
 
    Expect exit 0 with `read_checks_passed: true` and `policy_zero_authorized: true`.
 
-3. Re-run the native tests and the rehearsal (Phase 0, steps 2 and 3). They now fork a post-activation block. Run the rehearsal between 15:00 and 20:00 UTC so that it also runs the first reset.
+3. Use the native tests and rehearsal from Phase 0, with Beryl for a deployment before Cobalt activation. Refresh the deploy simulation against live state immediately before signing. A rehearsal outside 15:00–20:00 UTC must refuse the reset; record it as pending until the execution window opens. Repeat the integration checks on actual post-Cobalt state after activation.
 
 **Go** only if all three pass.
 
