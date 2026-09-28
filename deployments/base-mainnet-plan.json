@@ -1,0 +1,28 @@
+{
+  "status": "prepared_not_deployed",
+  "prepared_on": "2026-09-28",
+  "release_candidate": "v1.0.0-rc.1",
+  "chain_id": 8453,
+  "deployer": "0x7C3cf25108a28Bf70dBC52aD2A125f8f64cad90C",
+  "deployer_nonce_at_preflight": 7,
+  "seed_receiver_provisional": "0x7C3cf25108a28Bf70dBC52aD2A125f8f64cad90C",
+  "seed_usd_provisional": "125",
+  "predicted_contracts": {
+    "Valuation": "0x9febe4a9947c37401e997acd79f839dabf761e8e",
+    "IndexController": "0x685c8ffe61d8971b79fb8b0d4b1d845b1462fa8f",
+    "M7Vault": "0x1ad2e897e19e659c0aecdb19c1c714f861865bee",
+    "USDCGateway": "0xaba592b5fdc0e3c48a9c1f1f7a3a9aeba17bcf1c",
+    "M7Lens": "0x66446507c6f153d68e5bfd33b10fe98033f11ab2"
+  },
+  "account_policy_preflight_block": 51896512,
+  "account_policy_preflight_passed": true,
+  "signer_configured": false,
+  "production_monitor_configured": false,
+  "post_cobalt_mainnet_validation_complete": false,
+  "notes": [
+    "Predictions were reproduced by a local-fork rehearsal, not production transactions.",
+    "Any outgoing transaction or nonce-changing authorization can invalidate these predictions; recompute before signing.",
+    "The proposed seed receiver and size use the supplied address and the existing $125 example, pending any user correction.",
+    "No seed quantities or live quotes are locked by this plan; recalculate after deployment verification."
+  ]
+}

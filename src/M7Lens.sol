@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -62,8 +62,12 @@ contract M7Lens {
         v.oldestPriceAt = type(uint256).max;
         for (uint256 i; i < 8; ++i) {
             held[i] = vault.backing(i);
-            (, int256 answer,, uint256 updatedAt,) = valuation.feeds(i).latestRoundData();
-            if (answer <= 0 || updatedAt == 0) revert InvalidPrice(i);
+            (uint80 round, int256 answer,, uint256 updatedAt, uint80 answeredInRound) =
+                valuation.feeds(i).latestRoundData();
+            if (
+                answer <= 0 || round == 0 || answeredInRound < round || updatedAt == 0
+                    || updatedAt > block.timestamp
+            ) revert InvalidPrice(i);
             prices[i] = Math.mulDiv(uint256(answer), 1e18, valuation.feedUnits(i));
             if (updatedAt < v.oldestPriceAt) v.oldestPriceAt = updatedAt;
             if (i < 7) {

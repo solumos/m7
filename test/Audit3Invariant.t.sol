@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 import {Test, Vm} from "forge-std/Test.sol";
@@ -318,6 +318,7 @@ contract Audit3Handler is Test {
         uint256 high;
         for (uint256 i; i < 7; ++i) {
             uint256 held = vault.backing(i);
+            if (held < floorUnits) resetNotEqualAfterFullStep = true;
             if (held <= 3 * floorUnits) continue;
             uint256 value = held * prices[i] / 1e8;
             low = Math.min(low, value);

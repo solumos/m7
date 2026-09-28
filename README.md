@@ -2,11 +2,23 @@
 
 M7 turns seven Coinbase stock tokens on Base into one transferable ERC-20 receipt that holds them in equal value. A user supplies USDC; the gateway buys the required constituent quantities, deposits them in the vault, and mints M7. Redemption reverses that process. Each share represents the same proportion of the actual basket. Once a quarter, anyone can trigger a reset that trades the basket back to equal weights, planned entirely on chain from oracle prices.
 
-It is free software: no fee, no owner, no admin keys and no upgrades. Users pay only the existing pools' prices and gas, and the vault pays whoever triggers a reset a small, bounded reward.
+M7's original code and documentation are free software released into the public domain under the [Unlicense](LICENSE), provided as is without warranty. The protocol has no fee, no owner, no admin keys and no upgrades. Users pay only the existing pools' prices and gas, and the vault pays whoever triggers a reset a small, bounded reward.
 
 This repository implements the contracts and operating tools. It has **not been deployed or independently audited**. The current code passes native B20 tests against live Base under both Beryl and Cobalt precompile rules, and a rehearsal of the mainnet runbook on a local fork. No live funds were spent. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the mainnet runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
 
-A [third internal review](docs/AUDIT-3.md) covers the equal-weight code: no path to take or dilute deposits was found. Its two medium findings, about the reset at larger sizes, and its six smaller ones are fixed, with regression tests on live Base pools. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
+A [fourth internal review](docs/AUDIT-4.md) checks the tranche-based reset and fixes premature completion during precision-floor recovery, plus malformed oracle rounds in the display lens. The [third review](docs/AUDIT-3.md) covers the equal-weight redesign and its reset-capacity and sandwich findings. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
+
+The [architecture review](docs/ARCHITECTURE-REVIEW.md) evaluates decentralization, permanent venue dependencies, keeper incentives, and failure recovery. M7 has no ongoing administrator of its own; its assets, prices, execution venues, and chain still have external dependencies and authorities.
+
+The [release candidate record](docs/RELEASE-CANDIDATE.md) lists the latest shipping checks and remaining deployment steps. Predicted addresses are preparation data, not live contracts.
+
+## License
+
+The [Unlicense](LICENSE) applies to original M7 contracts, tests, scripts, configuration, and documentation. Anyone may use, modify, redistribute, or sell that work for commercial or non-commercial purposes. It is supplied as is, without warranty or guarantee; the full warranty and liability disclaimer is in the license.
+
+Third-party code retains its own licenses and copyright notices. OpenZeppelin Contracts 5.4.0 is MIT-licensed; forge-std 1.9.7 offers MIT or Apache-2.0 terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the notices and scope. The public-domain dedication covers only the contributors' own rights, and does not relicense dependencies or external protocols.
+
+Contributions of original work must be submitted under the same Unlicense terms. Identify any third-party material and preserve its applicable license and notices.
 
 ## Run it
 
@@ -63,7 +75,7 @@ flowchart LR
   - targets are equal value at that snapshot; each tranche moves every stock the same fraction of the way, so that no trade is worth more than about $10,000, and at most doubles a stock's quantity share;
   - every stock is only sold or only bought, sales first, and no trade starts in a pool more than 25 ticks against the vault from its own 10-minute average;
   - each leg's minimum output is its oracle value less 1%, and total loss is bounded by 1% of traded value plus the reward;
-  - no stock ends further from its target than it started; the quarter completes once every stock is within 10 bp of equal value and cash is within max(1 bp of NAV, $0.07); the next quarter's reset opens 30 days later at the earliest;
+  - each stock's distance from its target may increase by at most 30 bp of that target; completion normally requires equal value within 10 bp and cash within max(1 bp of NAV, $0.07), with the precision-floor and dust exceptions described in the methodology; the next quarter's reset opens 30 days later at the earliest;
   - a tranche that trades pays `rewardTo` 5 bp of its one-way traded value, at most $25, in USDC, funded pro rata by every stock.
 
   There are no arbitrary calls, admin, upgrade keys, or asset-withdrawal functions.
@@ -72,9 +84,9 @@ flowchart LR
 
 Canonical asset order is **AAPLc, AMZNc, GOOGLc, METAc, MSFTc, NVDAc, TSLAc, USDC**. Stocks have 8 decimals, USDC has 6, M7 has 18. M7 uses standard ERC-20; B20 is the underlying stock format, not the index accounting mechanism.
 
-M7 deliberately does not implement ERC-4626. That standard assumes one underlying asset, with deposits, withdrawals and `convertToAssets` in that asset and previews exact for the current block. An M7 share is backed by seven stocks plus incidental cash, in-kind entry takes all of them in proportion, and the USDC route runs seven pool swaps whose results no view function can compute exactly. Presenting USDC as the asset would turn `convertToAssets` into an oracle estimate that integrators treat as exact. The multi-asset variants do not fit either: ERC-7575 still enters through one asset at a time, and ERC-7540 covers asynchronous requests. As a plain ERC-20, M7 works with any wallet, exchange or bridge.
+M7 deliberately does not implement ERC-4626. That standard assumes one underlying asset, with deposits, withdrawals and `convertToAssets` in that asset and previews exact for the current block. An M7 share is backed by seven stocks plus incidental cash, in-kind entry takes all of them in proportion, and the USDC route runs seven pool swaps whose results no view function can compute exactly. Presenting USDC as the asset would turn `convertToAssets` into an oracle estimate that integrators treat as exact. The multi-asset variants do not fit either: ERC-7575 still enters through one asset at a time, and ERC-7540 covers asynchronous requests. M7 exposes the ERC-20 interface, but its transfer policies and basket-specific redemption behavior require integration checks for wallets, exchanges, lending protocols and bridges.
 
-Gateway operations are atomic: a blocked constituent or unfillable swap reverts the entire USDC operation. In-kind holders can instead use `redeemBasketWithClaims`, so one frozen asset never traps the others. Claims are paid before holders' backing but are not protected from issuer seizure of the vault's own holdings. A fully seized-to-zero stock stops new issuance until a reset rebuilds it; redemptions reflect remaining holdings.
+Gateway operations are atomic: a blocked constituent or unfillable swap reverts the entire USDC operation. In-kind holders can instead use `redeemBasketWithClaims` to defer blocked transfers while receiving deliverable legs. This still requires working balance reads; it does not isolate every possible token failure. Claims are paid before holders' backing but are not protected from issuer seizure of the vault's own holdings. If reserves become insufficient, successful claim withdrawals can exhaust the remaining assets before other claimants withdraw. A fully seized-to-zero stock stops new issuance until a reset rebuilds it; recovery requires sufficient remaining backing and executable trades, and redemptions reflect remaining holdings.
 
 The initial bootstrap issues 1,000 M7 against the supplied basket, permanently locking **10 shares (1% of the seed backing)** at address `0x01`; the seed receiver receives 990 shares. For a $125 basket, about $1.25 stays permanently in the vault. The seed funder may initialize only once and has no subsequent authority. The initial share price depends on actual backing, not a guaranteed peg.
 
@@ -107,7 +119,7 @@ lens.value();                             // plus NAV, supply, per-asset values,
 
 The gateway returns the USDC actually spent and received. `M7Lens` reports the value of a share, and of the whole vault, from the latest oracle prices at any time; unlike the reset's valuation it applies no trading window or staleness rule, and it returns the time of its stalest price instead. Stock feeds stand still outside market hours, so treat it as a display price, not a lending or liquidation price. Obtain executable quotes for the vault's current component quantities; a Chainlink reference price is not an executable quote. A USDC-budget UI chooses a share quantity that fits the budget, sets its spending ceiling, and receives any refund; wallets should pad gas estimates for the seven-swap gateway calls. There is no yield strategy, queue, or dedicated M7 liquidity pool. Existing DEX fees, price impact, gas, and issuer economics still apply.
 
-M7 transfers check the sender, receiver and caller against every stock's B20 transfer policy, so an address an issuer blocks cannot receive, send or redeem M7. Contracts that hold M7, such as pools, must also be authorized. Deferred claims belong to the redeeming address, which may withdraw them to any eligible address once the asset can move.
+M7 transfers check the sender, receiver and caller against every stock's B20 transfer policy. A policy denial can block receipt transfers, and contracts that hold M7, such as pools, must also be authorized. Partial redemption checks delivery per stock and defers blocked legs. Deferred claims belong to the redeeming address; withdrawal requires that address and the destination to satisfy the applicable policies and the asset to be transferable.
 
 ## Quarterly reset
 

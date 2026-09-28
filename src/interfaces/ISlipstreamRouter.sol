@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 /// @dev Aerodrome Slipstream periphery ABI. The factory uses tick spacing, not a V3 fee tier.

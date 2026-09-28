@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -29,6 +29,7 @@ contract IndexController is ReentrancyGuard {
         uint256[7] next;
         uint256 nav;
         uint256 supply;
+        uint256 floorUnits;
         uint256 step;
         uint256 fraction;
         uint256 sold;
@@ -48,6 +49,7 @@ contract IndexController is ReentrancyGuard {
     error RebalanceLoss();
     error ResidualCash();
     error EmptyVault();
+    error NoProgress();
     error MissingComponent(uint256 index);
     error NotCompliant();
     error PoolMoved(uint256 index);
@@ -185,6 +187,8 @@ contract IndexController is ReentrancyGuard {
             _readBacking(held);
             navAfter = _verify(plan, held);
             // A tranche whose every leg was dust has nothing left to do.
+            // A damaged basket must stay eligible for recovery instead of consuming the quarter.
+            if (plan.legs == 0 && !_precisionIntact(plan, held)) revert NoProgress();
             completed = plan.legs == 0 || _complete(plan, held, navAfter);
         }
         if (completed) {
@@ -264,14 +268,14 @@ contract IndexController is ReentrancyGuard {
         for (uint256 i; i < 7; ++i) {
             denominator += plan.target[i] * plan.prices[i];
         }
-        uint256 floorUnits = Math.mulDiv(
+        plan.floorUnits = Math.mulDiv(
             vault.MIN_LOCKED_STOCK_UNITS(), plan.supply, vault.LOCKED_SHARES(), Math.Rounding.Ceil
         );
         for (uint256 i; i < 7; ++i) {
             uint256 goal =
                 Math.mulDiv(investable, STOCK_UNIT * plan.target[i], denominator, Math.Rounding.Ceil);
-            if (goal < floorUnits) {
-                goal = floorUnits;
+            if (goal < plan.floorUnits) {
+                goal = plan.floorUnits;
                 plan.floored |= 1 << i;
             }
             plan.goal[i] = goal;
@@ -456,8 +460,24 @@ contract IndexController is ReentrancyGuard {
     /// @dev The quarter's reset is complete when every stock holds the same quantity per unit of equal-value share,
     ///      within the deadband, and cash is within its cap.
     function _complete(Plan memory plan, uint256[8] memory held, uint256 nav) private pure returns (bool) {
+        if (!_precisionIntact(plan, held)) return false;
+        for (uint256 i; i < 7; ++i) {
+            // Excluding a floor-constrained stock from equal weights does not mean it can be ignored:
+            // recovery must have reached the floor, and any sellable surplus must have been removed.
+            if (
+                (plan.floored & (1 << i)) != 0
+                    && held[i] > plan.floorUnits + Math.mulDiv(plan.floorUnits, DEADBAND_BPS, BPS)
+            ) return false;
+        }
         return _compliant(held, plan.shares, plan.floored, DEADBAND_BPS)
             && _cashWithinCap(held[7], nav, plan.prices[7]);
+    }
+
+    function _precisionIntact(Plan memory plan, uint256[8] memory held) private pure returns (bool) {
+        for (uint256 i; i < 7; ++i) {
+            if (held[i] < plan.floorUnits) return false;
+        }
+        return true;
     }
 
     /// @dev Price-free check: every stock holds the same quantity per unit of share, within `toleranceBps`. Stocks

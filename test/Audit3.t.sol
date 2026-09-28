@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
@@ -135,13 +135,13 @@ contract Audit3Test is Test {
         assertTrue(controller.executedQuarter(controller.currentQuarter()));
     }
 
-    /// E-05: every stock below the precision floor (only possible after issuer seizures of all seven) no longer panics:
-    /// nothing is compared, so there is nothing to trade.
+    /// E-05/A4-01: an unfunded precision deficit fails explicitly, without consuming the quarter.
     function testAudit3EveryStockBelowTheFloorHasNothingToTrade() public {
         _deploy(100, 0.005e8); // floor is 0.01 token per 1,000 shares
+        vm.expectRevert(IndexController.NoProgress.selector);
         controller.rebalance(block.timestamp, KEEPER);
         assertEq(vault.calls(), 0);
-        assertTrue(controller.executedQuarter(controller.currentQuarter()));
+        assertFalse(controller.executedQuarter(controller.currentQuarter()));
     }
 
     /// E-06: a completed reset is followed by at least 30 days without one. After a reset on Wednesday December 30,

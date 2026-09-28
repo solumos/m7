@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 /// @dev A Slipstream pool's `slot0` tick and `observe` cumulatives for venue doubles. The tick held `averageTick` over

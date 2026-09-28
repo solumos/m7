@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 /// @dev Subset of Base's IB20 policy surface (github.com/base/base-std, src/interfaces/IB20.sol).

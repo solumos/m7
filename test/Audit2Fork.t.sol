@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
@@ -74,6 +74,9 @@ contract Audit2ForkTest is Test {
     ISlipstreamRouter constant ROUTER = ISlipstreamRouter(0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F);
     IERC20 constant USDC = IERC20(0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913);
     address constant WETH = 0x4200000000000000000000000000000000000006;
+
+    // Cleanup refunds arrive here; only the deliberately vulnerable victim lacks receive().
+    receive() external payable {}
 
     function _startFork() private {
         vm.skip(!vm.envOr("BASE_FORK_TEST", false));

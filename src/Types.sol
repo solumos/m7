@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 /// @dev Indices 0..6 are the seven stocks; 7 is USDC. Routes never contain arbitrary calldata or pools:

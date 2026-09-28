@@ -2,7 +2,7 @@
 
 This runbook deploys M7 to Base mainnet, seeds it, runs the first quarterly reset and keeps it monitored. Each step gives the command, what a good result looks like, and when to stop.
 
-None of the five contracts has an owner, and none charges a fee. Nothing can pause, cap or upgrade them. A mistake after the bootstrap means a new deployment and asking holders to migrate. The contracts have not had an independent audit; launching without one is the owner's decision. Say so wherever the deployment is announced.
+None of the five contracts has an owner or charges a protocol fee. M7 has no privileged pause or upgrade function; external asset restrictions, unavailable dependencies, and its own execution gates can still stop operations. A mistake after the bootstrap can require a new deployment and voluntary holder migration, subject to the assets being transferable. The contracts have not had an independent audit; launching without one is the launch organizer's decision. Say so wherever the deployment is announced.
 
 ## Roles and funding
 
@@ -277,7 +277,7 @@ None of these changes anything, and an unfinished quarter only means the basket 
 
 **Backing per share fell.** Minting, redeeming and claims never lower it, so a fall outside a reset means an issuer seized or burned vault holdings. Check the stock's `Transfer` events from the vault and the issuer's announcements. Claims are paid before holders, so holders absorb the loss.
 
-**Minting blocked.** An issuer seizure pushed a stock below the vault's precision floor. Redemptions still work, and the next reset's tranches rebuild the stock.
+**Minting blocked.** An issuer seizure may have pushed a stock below the vault's precision floor. Remaining backing can still be redeemed subject to token availability and transfer rules. Reset tranches can rebuild the stock only if sufficient backing remains, reserves are covered, prices are usable and trades can execute.
 
 **Preflight failure.** The message names the check:
 - a paused stock or issuer feed;

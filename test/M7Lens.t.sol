@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Unlicense
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
@@ -123,6 +123,24 @@ contract M7LensTest is Test {
         feeds[5].set(0, block.timestamp);
         vm.expectRevert(abi.encodeWithSelector(M7Lens.InvalidPrice.selector, 5));
         lens.value();
+    }
+
+    function testMalformedRoundsAreRejectedWithoutRejectingOldPrices() public {
+        feeds[5].set(225e8, block.timestamp + 1);
+        vm.expectRevert(abi.encodeWithSelector(M7Lens.InvalidPrice.selector, 5));
+        lens.value();
+
+        feeds[5].set(225e8, block.timestamp - 3 days);
+        feeds[5].setRounds(2, 1);
+        vm.expectRevert(abi.encodeWithSelector(M7Lens.InvalidPrice.selector, 5));
+        lens.value();
+
+        feeds[5].setRounds(0, 0);
+        vm.expectRevert(abi.encodeWithSelector(M7Lens.InvalidPrice.selector, 5));
+        lens.value();
+
+        feeds[5].setRounds(2, 2);
+        assertEq(lens.value().oldestPriceAt, block.timestamp - 3 days);
     }
 
     function testRejectsMismatchedValuation() public {

@@ -1,5 +1,7 @@
 # M7 security review 3 — 2026-09-28
 
+Follow-up: [review 4](AUDIT-4.md) found and fixed a completion-check gap in this remediation. Precision-floor exclusions could leave a seized stock unrecovered, and the all-below-floor case now fails explicitly instead of consuming the quarter. The results below describe review 3's historical state.
+
 ## Scope and conclusion
 
 Reviewed commit [`54b02e8`](https://github.com/solumos/mag7/tree/54b02e8), the equal-weight redesign now on `main`. Scope: every contract and interface in `src/`, the deployment and maintenance scripts, the rehearsal, and the off-chain tools where they feed on-chain actions. No earlier review covered this code. Review 2 covered `2c1b641`; since then `src/` has changed by 1,099 added and 561 removed lines. Those changes are the remediation of both reviews, the removal of the gateway's fee and owner, the lens, and the redesign itself. This is a third internal, AI-assisted review, not an external firm's attestation or formal verification. It covers the code, not legal or issuer eligibility.
