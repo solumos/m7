@@ -130,7 +130,7 @@ Updated September 28: the launch organizer chose to deploy now under Beryl, befo
      --broadcast --slow --gas-estimate-multiplier 200
    ```
 
-   For the prepared local signer, replace `--ledger` with `--account m7-deployer`; enter its password only in your own terminal. Verify its address first with `cast wallet address --account m7-deployer`.
+   For a local signer, replace `--ledger` with `--account <keystore-name>`; enter its password only in your own terminal. Verify its address first with `cast wallet address --account <keystore-name>`.
 
 4. Verify on chain and write the deployment record:
 

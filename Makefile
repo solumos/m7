@@ -1,4 +1,4 @@
-.PHONY: deps test check integration native rehearse
+.PHONY: deps test check ui-check integration native rehearse
 
 deps:
 	forge install --no-git --shallow OpenZeppelin/openzeppelin-contracts@v5.4.0 foundry-rs/forge-std@v1.9.7
@@ -11,6 +11,10 @@ check:
 	forge fmt --check
 	forge build --sizes
 	$(MAKE) test
+
+ui-check:
+	npm --prefix ui test
+	npm --prefix ui run build
 
 integration:
 	python3 scripts/verify_base.py

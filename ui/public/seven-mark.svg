@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 224" fill="none">
+  <defs>
+    <clipPath id="stripes">
+      <path d="M0 24h288v20H0zm0 26h288v20H0zm0 26h288v20H0zm0 26h288v20H0zm0 26h288v20H0zm0 26h288v20H0zm0 26h288v24H0z"/>
+    </clipPath>
+  </defs>
+  <path d="M58 14h210l-16 44-92 156H84l90-144H38z" stroke="#465045"/>
+  <path d="M46 24h204l-18 48-82 132H86l84-132H28z" fill="#d5ff5e" clip-path="url(#stripes)"/>
+</svg>

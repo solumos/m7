@@ -22,9 +22,7 @@
   "account_policy_preflight_passed": true,
   "signer_configured": true,
   "signer_preparation": {
-    "keystore_account": "m7-deployer",
-    "keystore_present": true,
-    "keystore_permissions": "0600",
+    "method": "encrypted_local_keystore",
     "derived_address_verified": true
   },
   "funding_preflight": {

@@ -9,6 +9,26 @@ upstream license files. M7 uses the MIT option for forge-std; its upstream
 Apache-2.0 alternative remains available. Build tools and external deployed
 protocols are separate projects governed by their own terms.
 
+The optional website in `ui/` uses viem and its runtime dependencies under MIT
+licenses. `ui/package-lock.json` pins their versions. `ui/notices.js` includes
+their complete upstream notices in each website build as
+`dist/THIRD_PARTY_NOTICES.txt`; preserve that file when publishing the site.
+
+The seven company logo images in `ui/public/companies/` were obtained without
+modification from the `icon_url` fields of Coinbase's public Tokenized Stocks
+API, matched by the underlying token contract addresses. Their source URLs and
+file hashes are recorded in `ui/public/companies/sources.json`. These third-party
+brand assets and trademarks are not covered by M7's Unlicense; rights remain with
+their respective owners. They identify the basket's underlying companies and do
+not indicate affiliation with or endorsement of M7.
+
+The website self-hosts the unmodified Chakra Petch SemiBold font from Google
+Fonts. Copyright 2018 The Chakra Petch Project Authors. It is licensed under the
+SIL Open Font License 1.1, retained in `ui/public/fonts/OFL.txt` and included in
+the built website's notices. Font source:
+https://fonts.gstatic.com/s/chakrapetch/v13/cIflMapbsEk7TDLdtEz1BwkeQI5FQA.ttf
+Upstream license: https://github.com/google/fonts/blob/main/ofl/chakrapetch/OFL.txt
+
 ## OpenZeppelin Contracts 5.4.0 — MIT
 
 Source: https://github.com/OpenZeppelin/openzeppelin-contracts/tree/v5.4.0

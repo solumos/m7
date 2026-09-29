@@ -1,0 +1,76 @@
+{
+  "source_api": "https://api.coinbase.com/v1/tokenized-stocks",
+  "retrieved_at": "2026-09-28",
+  "assets": [
+    {
+      "symbol": "AAPLc",
+      "name": "Apple Inc.",
+      "contract_address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+      "file": "AAPLc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/873819f4b14efe44b94abecbc8e8864d2998163abd0ca55b449ee6eb07d0d94c.png",
+      "sha256": "873819f4b14efe44b94abecbc8e8864d2998163abd0ca55b449ee6eb07d0d94c",
+      "width": 200,
+      "height": 200
+    },
+    {
+      "symbol": "AMZNc",
+      "name": "Amazon.com Inc.",
+      "contract_address": "0xb200000000000000000000d9192b6B456483C2E8",
+      "file": "AMZNc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/06d3c2cac2c89e3a8bc4b2fe40ff259f104b55244321dea400e44b22f215896b.png",
+      "sha256": "06d3c2cac2c89e3a8bc4b2fe40ff259f104b55244321dea400e44b22f215896b",
+      "width": 200,
+      "height": 200
+    },
+    {
+      "symbol": "GOOGLc",
+      "name": "Alphabet Inc.",
+      "contract_address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+      "file": "GOOGLc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/0e80e31df40f7c42b49a3c7f6d23c6351625d73f235aeb69006ddee9221702b0.png",
+      "sha256": "0e80e31df40f7c42b49a3c7f6d23c6351625d73f235aeb69006ddee9221702b0",
+      "width": 200,
+      "height": 200
+    },
+    {
+      "symbol": "METAc",
+      "name": "Meta Platforms Inc.",
+      "contract_address": "0xb2000000000000000000008bC8786B856E61707C",
+      "file": "METAc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/1cedbfb3caee9498470945ff5041715b8c90921d904b3567a43bc4df82069e66.png",
+      "sha256": "1cedbfb3caee9498470945ff5041715b8c90921d904b3567a43bc4df82069e66",
+      "width": 200,
+      "height": 200
+    },
+    {
+      "symbol": "MSFTc",
+      "name": "Microsoft Corporation",
+      "contract_address": "0xB200000000000000000000Ab99cFa739E253872B",
+      "file": "MSFTc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/e90930ade985016f48816c6bd9fd1e8274b28507f4833881b3a16c77c2a3e2e7.png",
+      "sha256": "e90930ade985016f48816c6bd9fd1e8274b28507f4833881b3a16c77c2a3e2e7",
+      "width": 200,
+      "height": 200
+    },
+    {
+      "symbol": "NVDAc",
+      "name": "NVIDIA Corporation",
+      "contract_address": "0xb20000000000000000000078ee7ce2fE4908108C",
+      "file": "NVDAc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/1fee9b7a44e800d438dd9d96c3283e05784c925c2c871a48ff735950740b551a.png",
+      "sha256": "1fee9b7a44e800d438dd9d96c3283e05784c925c2c871a48ff735950740b551a",
+      "width": 200,
+      "height": 200
+    },
+    {
+      "symbol": "TSLAc",
+      "name": "Tesla Inc.",
+      "contract_address": "0xb2000000000000000000001e800a7f5189430cD0",
+      "file": "TSLAc.png",
+      "source_url": "https://metadata.coinbase.com/equity_icons/a3b67028295d0e9fa3182c867b8a9afed5ebcbd8c012de3a46e160ae5e490980.png",
+      "sha256": "a3b67028295d0e9fa3182c867b8a9afed5ebcbd8c012de3a46e160ae5e490980",
+      "width": 200,
+      "height": 200
+    }
+  ]
+}

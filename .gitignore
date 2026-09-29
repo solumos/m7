@@ -1,9 +1,35 @@
+# Local credentials and operator configuration
+.env
+.env.*
+!.env.example
+*.env
+keystore/
+keystores/
+*.key
+*.pem
+
+# Contract dependencies and generated artifacts
 cache/
 out/
 broadcast/
 lib/
-.env
-.env.*
-!.env.example
 __pycache__/
 *.pyc
+
+# Website dependencies, builds, and browser test output
+ui/node_modules/
+ui/dist/
+ui/test-results/
+ui/playwright-report/
+ui/public/LICENSE.txt
+ui/public/THIRD_PARTY_NOTICES.txt
+.vercel/
+
+# Local design-tool state; share only the project preferences
+.impeccable/*
+!.impeccable/config.json
+
+# Local runtime and OS files
+*.log
+price-history.jsonl
+.DS_Store

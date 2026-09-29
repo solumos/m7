@@ -1,16 +1,46 @@
-# M7 — seven stocks in equal weight
+# M7 — a programmable MAG7 index
 
-M7 turns seven Coinbase stock tokens on Base into one transferable ERC-20 receipt that holds them in equal value. A user supplies USDC; the gateway buys the required constituent quantities, deposits them in the vault, and mints M7. Redemption reverses that process. Each share represents the same proportion of the actual basket. Once a quarter, anyone can trigger a reset that trades the basket back to equal weights, planned entirely on chain from oracle prices.
+M7 is free software for an equal-weight basket of the Magnificent Seven stocks on Base: Apple, Amazon, Alphabet, Meta, Microsoft, NVIDIA, and Tesla. One ERC-20 token represents a proportional share of the vault's underlying Coinbase stock tokens and incidental USDC. The contracts target one-seventh of stock value per company through permissionless quarterly resets.
 
-M7's original code and documentation are free software released into the public domain under the [Unlicense](LICENSE), provided as is without warranty. The protocol has no fee, no owner, no admin keys and no upgrades. Users pay only the existing pools' prices and gas, and the vault pays whoever triggers a reset a small, bounded reward.
+[Website](https://m7token.xyz) · [Website source](ui/) · [Methodology](docs/METHODOLOGY.md) · [Architecture](docs/ARCHITECTURE-REVIEW.md) · [Contributing](CONTRIBUTING.md)
 
-M7 was deployed and bootstrapped on **Base mainnet (chain 8453) on September 28, 2026**. The $125 target seed created 1,000 M7: 990 for the seed receiver and 10 permanently locked. Public minting is open. All 84 post-bootstrap checks passed, and Sourcify reports exact creation and runtime source matches for all five contracts. The contracts have **not been independently audited**. Native integration tests passed under Beryl and simulated Cobalt rules; actual post-Cobalt checks remain pending. The first reset awaits the weekday 15:00–20:00 UTC execution window and valid feeds. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
+## Why M7 exists
+
+An equal-weight basket is a rule that software can execute. M7 explores a decentralized, programmable alternative to ETF products: transparent basket accounting, direct minting and redemption, and a rebalance policy enforced by contracts instead of a discretionary fund manager.
+
+The goal is to bring the cost of running a simple index down by orders of magnitude. A recurring charge of 0.3% or 0.6% of assets grows with the capital held, even when the portfolio rule stays the same. M7 removes that recurring management fee entirely. It pays for execution when work is performed, including a bounded reward for whoever runs a reset.
+
+Programmability matters as much as cost. Applications can read the backing, quote basket quantities, mint, redeem, and trigger eligible resets through public contract interfaces. Developers can build their own interfaces and integrations, or fork the software. Integrations must account for the underlying issuers' transfer policies; ERC-20 compatibility alone does not guarantee that every pool, bridge, or lending protocol can hold M7.
+
+M7 has no administrator, owner privileges, or upgrade key. Full decentralization is the goal; the current system still depends on stock issuers and their custody and transfer controls, price feeds, liquidity pools, and Base. M7 is a tokenized basket, not a registered ETF or a promise of equivalent investor protections.
+
+## Fees and costs
+
+**M7 charges no ongoing management fee.** It does not skim a percentage of assets or issue fee shares merely because time passes.
+
+| Illustrative recurring annual charge | Cost on a constant $1 million of assets |
+| --- | ---: |
+| 0.60% of assets | $6,000 |
+| 0.30% of assets | $3,000 |
+| M7 management fee: 0% | $0 |
+
+These figures compare recurring asset-based charges, not total costs or equivalent products. For context, [Roundhill MAGS' April 30, 2026 prospectus](https://www.roundhillinvestments.com/assets/pdfs/MAGS_Summary_Prospectus.pdf) lists a 0.29% management fee and 0.30% total annual operating expenses; those are different measures.
+
+M7 still incurs pool fees, price impact, gas, underlying asset costs, and reset rewards. The reset caller receives 0.05% of the tranche's one-way traded value, capped at $25 per tranche, from the basket. This is a charge on work performed, not an annual percentage of all assets. Costs depend on turnover, liquidity, transaction size, and network conditions. Orders-of-magnitude lower **total** costs are a design ambition, not a measured result or guarantee; total costs can exceed those of an ETF.
+
+## Deployment and risks
+
+M7 was deployed and bootstrapped on **Base mainnet (chain 8453) on September 28, 2026**. The $125 target seed created 1,000 M7: 990 for the seed receiver and 10 permanently locked. Minting and redemption use the deployed contracts; actual weights drift between completed resets. Resets require someone to submit transactions and satisfy the contract's execution checks; they are not automatic scheduled jobs.
+
+The contracts have **not been independently audited**. Bugs, exploits, issuer restrictions, market changes, and dependency failures can cause permanent loss of all committed funds or prevent withdrawals. The hosted product is not available to users located in the United States. The software is provided as is, without warranties, under the [Unlicense](LICENSE). Use at your own risk.
+
+At launch, all 84 post-bootstrap checks passed and Sourcify reported exact creation and runtime source matches for all five contracts. Native integration tests passed under Beryl and simulated Cobalt rules; actual post-Cobalt checks remain pending in the release record. Verification and testing are not an independent audit. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the runbook, and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) states the rules.
 
 A [fourth internal review](docs/AUDIT-4.md) checks the tranche-based reset and fixes premature completion during precision-floor recovery, plus malformed oracle rounds in the display lens. The [third review](docs/AUDIT-3.md) covers the equal-weight redesign and its reset-capacity and sandwich findings. Two earlier reviews, the [first](docs/AUDIT.md) and the [second](docs/AUDIT-2.md), cover an earlier, cap-weighted design (M7CAP) whose quarterly targets came from UMA assertions; their status sections say which findings still apply.
 
 The [architecture review](docs/ARCHITECTURE-REVIEW.md) evaluates decentralization, permanent venue dependencies, keeper incentives, and failure recovery. M7 has no ongoing administrator of its own; its assets, prices, execution venues, and chain still have external dependencies and authorities.
 
-The [deployment record](deployments/base-mainnet.json) contains actual creation transactions and the source commit. The [launch record](deployments/base-mainnet-launch.json) records seed purchases, bootstrap and checks; gateway minting, redemptions and transfers were also simulated against the deployed state without sending additional transactions. The [source verification record](deployments/base-mainnet-source.json) contains the public verification results. The [release candidate record](docs/RELEASE-CANDIDATE.md) preserves preparation evidence.
+The [deployment record](deployments/base-mainnet.json) contains actual creation transactions and the source commit. The [launch record](deployments/base-mainnet-launch.json) records seed purchases, bootstrap and checks; gateway minting, redemptions and transfers were also simulated against the deployed state without sending additional transactions. The [source verification record](deployments/base-mainnet-source.json) contains the public verification results. The [release candidate record](docs/RELEASE-CANDIDATE.md) preserves preparation evidence. These are dated snapshots, not live operational status; the website reads current onchain state.
 
 | Contract | Base mainnet address and verified source |
 | --- | --- |
@@ -22,15 +52,30 @@ The [deployment record](deployments/base-mainnet.json) contains actual creation 
 
 ## License
 
-The [Unlicense](LICENSE) applies to original M7 contracts, tests, scripts, configuration, and documentation. Anyone may use, modify, redistribute, or sell that work for commercial or non-commercial purposes. It is supplied as is, without warranty or guarantee; the full warranty and liability disclaimer is in the license.
+The [Unlicense](LICENSE) applies to original M7 contracts, website code and artwork, tests, scripts, configuration, and documentation. Anyone may use, modify, redistribute, or sell that work for commercial or non-commercial purposes. It is supplied as is, without warranty or guarantee; the full warranty and liability disclaimer is in the license.
 
-Third-party code retains its own licenses and copyright notices. OpenZeppelin Contracts 5.4.0 is MIT-licensed; forge-std 1.9.7 offers MIT or Apache-2.0 terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the notices and scope. The public-domain dedication covers only the contributors' own rights, and does not relicense dependencies or external protocols.
+Third-party code and assets retain their own licenses and notices. OpenZeppelin Contracts 5.4.0 is MIT-licensed; forge-std 1.9.7 offers MIT or Apache-2.0 terms. The website bundles MIT runtime dependencies and an OFL font; company logos and trademarks retain their owners' rights. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The public-domain dedication covers only the contributors' own rights, and does not relicense dependencies, company marks, or external protocols.
 
 Contributions of original work must be submitted under the same Unlicense terms. Identify any third-party material and preserve its applicable license and notices.
 
-## Run it
+## Repository layout
 
-Requirements: Foundry (tested with Forge 1.5.1), Python 3.9+, and Git for fetching pinned dependencies. No Node packages are required.
+| Path | Contents |
+| --- | --- |
+| [`src/`](src/) | Solidity vault, gateway, controller, valuation, and read-only lens |
+| [`ui/`](ui/) | Complete website: JavaScript/CSS, wallet flows, tests, and public assets |
+| [`test/`](test/) | Solidity and Python tests |
+| [`script/`](script/), [`scripts/`](scripts/) | Deployment, fork rehearsal, verification, and monitoring tools |
+| [`config/`](config/), [`deployments/`](deployments/) | Public integration configuration and dated deployment evidence |
+| [`docs/`](docs/), [`ops/`](ops/) | Methodology, internal reviews, runbook, and monitor service templates |
+
+## Run locally
+
+The website and contracts live in this repository. Neither the tests nor a local website build requires a production signing key.
+
+### Contracts and Python tools
+
+Requirements: Foundry (tested with Forge 1.5.1), Python 3.9+, and Git for fetching pinned dependencies. Node is only needed for the website.
 
 ```sh
 make deps
@@ -38,6 +83,22 @@ make check
 ```
 
 `make check` builds the contracts, checks formatting, and runs Solidity and Python tests. The live-state fork tests explicitly skip unless opted in. Solidity is pinned to 0.8.30; dependencies are OpenZeppelin 5.4.0 and forge-std 1.9.7.
+
+### Website
+
+Requires Node 22.12+ and npm. From the repository root:
+
+```sh
+npm --prefix ui ci
+make ui-check
+npm --prefix ui run dev
+```
+
+Open the local URL printed by Vite. `make ui-check` runs the website's Node tests and production build; `ui/dist/` can be hosted on any static HTTPS host. Browser tests and hosting instructions are in [ui/README.md](ui/README.md). [`vercel.json`](vercel.json) configures Vercel to build the site from the repository root. The npm package is marked `private` to prevent accidental npm publication; the source remains under the Unlicense.
+
+The development website reads Base mainnet and can request real wallet transactions. Browse without a wallet for read-only use; automated browser tests use mocked wallets and RPC responses.
+
+### Live integration and fork checks
 
 For native B20 integration, use Base's Foundry build, [base-anvil](https://github.com/base/base-anvil), which contains the Base precompiles. Install it beside ordinary Foundry, verified against its build attestation, as [the runbook](docs/DEPLOYMENT.md#toolchain) describes. Then:
 
@@ -139,7 +200,7 @@ FOUNDRY_BASE=cobalt "$BASE_FORGE" script script/Maintain.s.sol:Rebalance --rpc-u
 
 The script reads `CONTROLLER`, `EXECUTOR`, an optional `REWARD_TO` (default the executor) and an optional `DEADLINE`. It runs one tranche and reports whether the quarter completed or when the next tranche may start; it refuses once the quarter is complete or too soon after the last tranche. Simulate before broadcasting. A tranche that reverts (outside the window, stale prices, a pool too far from its oracle price or pushed from its own average) changes nothing and can be retried; if a quarter passes without a completed reset, the next quarter continues it and the basket keeps its quantities meanwhile.
 
-Each reset costs holders the pools' fees and price impact on its turnover, typically 5–15% of the vault's value per quarter, plus the rewards: 5 bp of the traded value, at most $25 per tranche. At that rate the reward is small until the vault is large, so bots may not run resets for a small vault; anyone can run the tranches by hand. The $10,000 trade cap keeps each tranche inside today's pool depth: in a volatile quarter a vault of about $1M needs a handful of tranches, and one of $10M about 50, a week of ten tranches a day. `scripts/monitor.py` alerts when a quarter's reset is still incomplete a week after it opens, and as critical with 21 days or fewer left; see [Monitoring](docs/DEPLOYMENT.md#monitoring).
+Each reset costs holders the pools' fees and price impact on the amounts traded, plus the reward of 5 bp of one-way traded value, capped at $25 per tranche. Turnover varies with changes in weights; it is not a fixed percentage of the vault or a promised operating cost. The reward may be too small to attract callers for a small vault. A $10,000 cap per trade limits tranche size but does not guarantee liquidity or completion within a quarter. `scripts/monitor.py` alerts when a quarter's reset is still incomplete a week after it opens, and as critical with 21 days or fewer left; see [Monitoring](docs/DEPLOYMENT.md#monitoring).
 
 ## Deployment workflow
 
@@ -157,6 +218,7 @@ The generic contracts cannot eliminate issuer freeze/seizure, custody, oracle, o
 ## Validation coverage
 
 Tests cover:
+
 - **Accounting:** seed, rounding and donation behavior; pro-rata non-dilution; mixed decimals.
 - **Gateway:** refunds, donation isolation, and never retaining user funds.
 - **Transfers and exits:** atomic failed swaps and transfer restrictions; deferred claims; B20 policy mirroring; reentrancy; pinned routes.
