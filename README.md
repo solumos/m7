@@ -65,9 +65,14 @@ Contributions of original work must be submitted under the same Unlicense terms.
 | [`src/`](src/) | Solidity vault, gateway, controller, valuation, and read-only lens |
 | [`ui/`](ui/) | Complete website: JavaScript/CSS, wallet flows, tests, and public assets |
 | [`test/`](test/) | Solidity and Python tests |
-| [`script/`](script/), [`scripts/`](scripts/) | Deployment, fork rehearsal, verification, and monitoring tools |
+| [`scripts/`](scripts/) | Deployment, fork rehearsal, verification, and monitoring tools |
 | [`config/`](config/), [`deployments/`](deployments/) | Public integration configuration and dated deployment evidence |
 | [`docs/`](docs/), [`ops/`](ops/) | Methodology, internal reviews, runbook, and monitor service templates |
+
+All operational commands live in `scripts/`: Foundry runs the `.s.sol` files,
+Bash runs `rehearse.sh`, and Python tools run from the repository root with
+`python3 -m scripts.<name>` (use `--help` for options). Shared RPC helpers live in
+`scripts/common.py`. Dated audit and deployment records retain their original paths.
 
 ## Run locally
 
@@ -108,12 +113,12 @@ BASE_FORK_TEST=true FOUNDRY_BASE=cobalt "$BASE_FORGE" test --match-contract Base
 
 `BASE_FORGE` is the path to the Base-aware `forge`. `FOUNDRY_BASE` selects the precompile rules: `beryl`, which mainnet runs until 2026-09-30 18:00 UTC, or `cobalt` after that. `BASE_RPC_URL` optionally selects a Base endpoint. The tests mutate only a local fork: they buy the seven B20s from their actual pools, run the real vault, gateway, controller and lens, and reset an unequal basket to equal weights through the live pools. They neither fabricate B20 balances nor broadcast transactions.
 
-`script/rehearse.sh` runs the mainnet runbook against a local base-anvil fork: deploy, verification, seed purchase, bootstrap, smoke tests, the monitor and the first reset.
+`scripts/rehearse.sh` runs the mainnet runbook against a local base-anvil fork: deploy, verification, seed purchase, bootstrap, smoke tests, the monitor and the first reset.
 
 Run current read-only integration checks separately:
 
 ```sh
-python3 scripts/verify_base.py
+python3 -m scripts.verify_base
 ```
 
 An exit status of 1 outside the execution window, or when no stock feed has updated within the last hour, is expected; `--reads-only` exits 0 whenever the read checks pass. `--account` also checks planned addresses, such as the vault and gateway, against every stock's transfer policies. The JSON distinguishes integration reads from reset eligibility, and quotes equal-dollar baskets through the pinned pools. Addresses, source provenance and pool identities are in [config/base.json](config/base.json) and [docs/INTEGRATION.md](docs/INTEGRATION.md).
@@ -121,7 +126,7 @@ An exit status of 1 outside the execution window, or when no stock feed has upda
 Replay recent execution windows under the controller's oracle rule, as evidence that quarterly resets stay available:
 
 ```sh
-python3 scripts/feed_availability.py --days 14
+python3 -m scripts.feed_availability --days 14
 ```
 
 ## Contracts and invariants
@@ -195,7 +200,7 @@ M7 transfers check the sender, receiver and caller against every stock's B20 tra
 Between resets the token quantities stay fixed and weights drift with prices. The reset needs no data beyond on-chain prices, so it can run without anyone's permission:
 
 ```sh
-FOUNDRY_BASE=cobalt "$BASE_FORGE" script script/Maintain.s.sol:Rebalance --rpc-url "$BASE_RPC_URL"
+FOUNDRY_BASE=cobalt "$BASE_FORGE" script scripts/Maintain.s.sol:Rebalance --rpc-url "$BASE_RPC_URL"
 ```
 
 The script reads `CONTROLLER`, `EXECUTOR`, an optional `REWARD_TO` (default the executor) and an optional `DEADLINE`. It runs one tranche and reports whether the quarter completed or when the next tranche may start; it refuses once the quarter is complete or too soon after the last tranche. Simulate before broadcasting. A tranche that reverts (outside the window, stale prices, a pool too far from its oracle price or pushed from its own average) changes nothing and can be retried; if a quarter passes without a completed reset, the next quarter continues it and the basket keeps its quantities meanwhile.
@@ -206,10 +211,10 @@ Each reset costs holders the pools' fees and price impact on the amounts traded,
 
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the step-by-step mainnet runbook: roles and funding, the live-state preflight, deploy, seed, smoke tests, the first reset, monitoring and the incident playbook. The tools it uses:
 
-- `script/Deploy.s.sol` deploys the Valuation, controller, vault, gateway and lens. The controller is bound to the vault by CREATE address prediction, and the vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
+- `scripts/Deploy.s.sol` deploys the Valuation, controller, vault, gateway and lens. The controller is bound to the vault by CREATE address prediction, and the vault's constructor refuses a controller that is not bound to it, so nonce drift fails the deployment instead of producing a mis-linked system.
 - `scripts/verify_deployment.py` checks every deployed immutable, binding and runtime bytecode before any funds go in, checks the state after the bootstrap, and writes the deployment record.
 - `scripts/seed_basket.py` sizes an equal-value seed at current prices, so the first reset has little to do.
-- `script/AcquireSeed.s.sol` buys the seed through the vault's pinned pools at no more than oracle value plus 1%. `script/Bootstrap.s.sol` re-verifies the linkage and deposits the seed atomically.
+- `scripts/AcquireSeed.s.sol` buys the seed through the vault's pinned pools at no more than oracle value plus 1%. `scripts/Bootstrap.s.sol` re-verifies the linkage and deposits the seed atomically.
 
 Scripts that touch B20 tokens need Base's Foundry build. Without `--broadcast` they only simulate. Use a hardware wallet or an encrypted Foundry keystore; no private key is required by the repository's tests or read tools.
 
@@ -225,6 +230,6 @@ Tests cover:
 - **Reset:** once per quarter; the price window and oracle gates; equal-value targets; the step limit on extreme moves; loss, compliance, cash and turnover bounds; small vaults; the reward's size, cap, funding and limits; Gregorian quarter boundaries.
 - **Oracles:** stale, quiet and paused feeds; USDC depeg; sequencer recovery.
 
-A fuzz campaign resets the basket after random ±20% price moves against pools that deviate from the oracle and keep a haircut. Stateful invariant campaigns check per-share backing, reserves, claims and gateway balances. Opt-in fork tests replay the router-dust scenario against live Base contracts. The native Base fork additionally tests real B20 transfers and policies, actual pool routing, complete USDC entry and exit, the lens, and a reset through the live pools; it needs Base's Foundry build and passes under both Beryl and Cobalt rules. `script/rehearse.sh` rehearses the deployment end to end.
+A fuzz campaign resets the basket after random ±20% price moves against pools that deviate from the oracle and keep a haircut. Stateful invariant campaigns check per-share backing, reserves, claims and gateway balances. Opt-in fork tests replay the router-dust scenario against live Base contracts. The native Base fork additionally tests real B20 transfers and policies, actual pool routing, complete USDC entry and exit, the lens, and a reset through the live pools; it needs Base's Foundry build and passes under both Beryl and Cobalt rules. `scripts/rehearse.sh` rehearses the deployment end to end.
 
 The helper pools assets into one receipt; it does not provide separately registered brokerage positions or per-stock tax-lot control to each holder. Its legal status and distribution depend on the final product structure and applicable issuer terms.

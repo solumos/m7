@@ -13,9 +13,8 @@ import os
 from pathlib import Path
 import sys
 
-from verify_base import RPC, SYMBOLS, address
+from scripts.common import ROOT, RPC, SYMBOLS, address
 
-ROOT = Path(__file__).resolve().parents[1]
 WAD = 10**18
 INITIAL_SHARES = 1_000 * WAD
 LOCKED_SHARES = 10 * WAD

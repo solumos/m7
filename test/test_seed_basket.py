@@ -1,10 +1,7 @@
-import sys
 import unittest
 from fractions import Fraction
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from seed_basket import MIN_RAW, build_seed, size
+from scripts.seed_basket import MIN_RAW, build_seed, size
 
 PRICES = [Fraction(341), Fraction(250), Fraction(343), Fraction(749), Fraction(518), Fraction(225), Fraction(372)]
 VAULT = '0x' + '11' * 20

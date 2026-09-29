@@ -56,10 +56,15 @@ test('the reset UI follows the contract UTC weekday window', () => {
 });
 
 test('checked-in UI ABIs match the compiled deployed interfaces when artifacts are available', t => {
+  // Solidity's internalType and unnamed-parameter labels do not affect the ABI.
+  const normalize = item => JSON.parse(JSON.stringify(item, (key, value) => key === 'internalType' || key === 'name' && value === '' ? undefined : value));
   for (const [name, abi] of Object.entries(abis)) {
     let artifact;
     try { artifact = JSON.parse(readFileSync(new URL(`../../out/${name}.sol/${name}.json`, import.meta.url))); }
     catch (error) { if (error.code === 'ENOENT') { t.skip('Run forge build to check ABI drift.'); return; } throw error; }
-    for (const item of abi) assert.ok(artifact.abi.some(a => JSON.stringify(a) === JSON.stringify(item)), `${name}.${item.name} matches`);
+    for (const item of abi) {
+      const compiled = artifact.abi.find(a => a.type === item.type && a.name === item.name);
+      assert.deepEqual(normalize(item), normalize(compiled), `${name}.${item.name} matches`);
+    }
   }
 });

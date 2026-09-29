@@ -16,9 +16,8 @@ import os
 from pathlib import Path
 import sys
 
-from verify_base import RPC
+from scripts.common import ROOT, RPC
 
-ROOT = Path(__file__).resolve().parents[1]
 DAY = 86400
 ORIGINAL = {'execution_window_utc_seconds': [15 * 3600, 17 * 3600], 'max_stock_feed_age_seconds': 3600,
             'fresh_signal_seconds': 3600, 'max_usdc_feed_age_seconds': 90000}

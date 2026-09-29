@@ -1,13 +1,10 @@
 import json
-import sys
 import unittest
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'scripts'))
-from verify_base import keccak_text
-from verify_deployment import CONTRACTS, SEED_LOCK, WAD, compare_bytecode, decode_string, from_broadcast, verify, wait_for_block
+from scripts.common import ROOT, keccak_text
+from scripts.verify_deployment import CONTRACTS, SEED_LOCK, WAD, compare_bytecode, decode_string, from_broadcast, verify, wait_for_block
 
 MANIFEST = json.loads((ROOT / 'config/base.json').read_text())
 ADDRESSES = {'Valuation': '0x' + 'a1' * 20, 'IndexController': '0x' + 'a2' * 20,
@@ -88,14 +85,14 @@ class VerifyDeploymentTest(unittest.TestCase):
     def test_waits_for_the_transaction_block_before_reading_state(self):
         rpc = Mock(block={'number': '0x63'})
         rpc.rpc.side_effect = [{'number': '0x63'}, {'number': '0x65'}]
-        with patch('verify_deployment.time.sleep'):
+        with patch('scripts.verify_deployment.time.sleep'):
             wait_for_block(rpc, 100)
         self.assertEqual(rpc.block['number'], '0x65')
 
     def test_lagging_rpc_never_passes_the_block_guard(self):
         rpc = Mock(block={'number': '0x63'})
         rpc.rpc.return_value = {'number': '0x63'}
-        with patch('verify_deployment.time.sleep'), self.assertRaisesRegex(ValueError, 'RPC is behind confirmed block 100'):
+        with patch('scripts.verify_deployment.time.sleep'), self.assertRaisesRegex(ValueError, 'RPC is behind confirmed block 100'):
             wait_for_block(rpc, 100)
 
     def test_consistent_deployment_passes(self):

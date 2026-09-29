@@ -1,9 +1,6 @@
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from feed_availability import ORIGINAL, age_at, evaluate
+from scripts.feed_availability import ORIGINAL, age_at, evaluate
 
 CURRENT = {'execution_window_utc_seconds': [54000, 72000], 'max_stock_feed_age_seconds': 90000,
            'fresh_signal_seconds': 3600, 'max_usdc_feed_age_seconds': 90000}

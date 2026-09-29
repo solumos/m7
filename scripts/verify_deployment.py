@@ -14,9 +14,8 @@ import subprocess
 import sys
 import time
 
-from verify_base import RPC, address, keccak_text
+from scripts.common import ROOT, RPC, address, keccak_text
 
-ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ('Valuation', 'IndexController', 'M7Vault', 'USDCGateway', 'M7Lens')
 SEED_LOCK = '0x' + '00' * 19 + '01'
 WAD = 10**18

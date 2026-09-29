@@ -4,38 +4,15 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from fractions import Fraction
-from functools import lru_cache
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
-import urllib.request
 
-ROOT = Path(__file__).resolve().parents[1]
-SYMBOLS = ('AAPLc', 'AMZNc', 'GOOGLc', 'METAc', 'MSFTc', 'NVDAc', 'TSLAc')
+from scripts.common import ROOT, RPC, address, keccak_text, request
 # IndexController.POOL_TWAP_WINDOW, and the observations it needs at one per 2-second block.
 POOL_TWAP_WINDOW = 600
 MIN_POOL_OBSERVATIONS = 300
-
-
-def request(url, payload=None):
-    data = None if payload is None else json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, headers={
-        'Content-Type': 'application/json', 'User-Agent': 'm7-integration/0.1'})
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return json.load(response)
-
-
-@lru_cache(maxsize=None)
-def selector(signature):
-    # Ethereum uses Keccak, not hashlib.sha3_256; reuse installed Foundry.
-    return subprocess.check_output(['cast', 'sig', signature], text=True).strip()
-
-
-@lru_cache(maxsize=None)
-def keccak_text(text):
-    return int(subprocess.check_output(['cast', 'keccak', text], text=True).strip(), 16)
 
 
 def rebalance_oracles_usable(now, stock_ages, usdc_age, risk):
@@ -50,46 +27,6 @@ def rebalance_oracles_usable(now, stock_ages, usdc_age, risk):
         'usdc_within_max_age': usdc_age <= risk['max_usdc_feed_age_seconds'],
     }
     return all(checks.values()), checks
-
-
-def word(value):
-    number = int(value, 16) if isinstance(value, str) else value
-    if not 0 <= number < 2**256:
-        raise ValueError('ABI word out of range')
-    return format(number, '064x')
-
-
-def words(encoded):
-    body = encoded[2:]
-    if len(body) % 64:
-        raise ValueError('Malformed ABI response')
-    return [int(body[i:i+64], 16) for i in range(0, len(body), 64)]
-
-
-def address(value):
-    return '0x' + format(value, '040x')
-
-
-class RPC:
-    def __init__(self, url):
-        self.url = url
-        chain = self.rpc('eth_chainId', [])
-        if int(chain, 16) != 8453:
-            raise ValueError('RPC is not Base mainnet')
-        self.block = self.rpc('eth_getBlockByNumber', ['latest', False])
-
-    def rpc(self, method, params):
-        response = request(self.url, {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params})
-        if 'error' in response:
-            raise ValueError(str(response['error']))
-        return response['result']
-
-    def call(self, target, signature, *args):
-        payload = selector(signature) + ''.join(word(arg) for arg in args)
-        return words(self.rpc('eth_call', [{'to': target, 'data': payload}, self.block['number']]))
-
-    def balance(self, target):
-        return int(self.rpc('eth_getBalance', [target, self.block['number']]), 16)
 
 
 def registry_answers_policy_zero(rpc, registry, accounts):
@@ -124,7 +61,7 @@ def verify(manifest, rpc_url, accounts=()):
         return {'answer': str(values[1]), 'updated_at': values[3],
                 'age_seconds': now - values[3], 'fresh': now - values[3] <= max_age}
 
-    issuer = {t['contract_address'].lower(): t for t in request(manifest['sources']['stock_api'])['tokens']}
+    issuer = {t['contract_address'].lower(): t for t in json.loads(request(manifest['sources']['stock_api']))['tokens']}
     require(rpc.call(manifest['usdc']['address'], 'decimals()')[0] == 6, 'USDC decimals mismatch')
     report['usdc_feed'] = feed_data(manifest['usdc'], manifest['risk_checks']['max_usdc_feed_age_seconds'])
     sequencer = rpc.call(manifest['sequencer_feed'], 'latestRoundData()')

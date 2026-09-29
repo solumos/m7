@@ -107,7 +107,7 @@
     }
   ],
   "launch_blockers": [
-    "Re-run the native tests and script/rehearse.sh on a post-Cobalt block (after 2026-09-30 18:00 UTC), with the rehearsal inside the 15:00-20:00 UTC window so it runs the first reset, and verify the deployment with scripts/verify_deployment.py before seeding.",
+    "Re-run the native tests and scripts/rehearse.sh on a post-Cobalt block (after 2026-09-30 18:00 UTC), with the rehearsal inside the 15:00-20:00 UTC window so it runs the first reset, and verify the deployment with scripts/verify_deployment.py before seeding.",
     "Issuer eligibility and legal review remain the owner's responsibility. The owner decided on 2026-09-26 to launch without an independent smart-contract review; the equal-weight reset and its remediation after review 3 (2026-09-28) have had internal review and testing only.",
     "Run scripts/monitor.py on an always-on server with tested alerting before seeding. While the reset reward (5 bp of each tranche's traded value) is too small to attract keepers, the owner must run each quarter's tranches."
   ],

@@ -4,7 +4,7 @@
 # Every transaction goes to the local fork: no keys, no mainnet broadcast. The repository is copied to a temporary
 # directory so rehearsal broadcast files never mix with real ones. Accounts are impersonated and funded on the fork.
 #
-#   BASE_RPC_URL=<Base mainnet RPC> script/rehearse.sh
+#   BASE_RPC_URL=<Base mainnet RPC> scripts/rehearse.sh
 #
 # The fork source must serve recent historical state: https://mainnet.base.org does; publicnode refuses once the
 # fork is a few minutes old.
@@ -54,7 +54,12 @@ monitor_ok() { # readable, and no critical alert except the quarter deadline (re
 }
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/m7-rehearsal.XXXXXX")
 mkdir -p "$WORK/logs"
-rsync -a --exclude broadcast --exclude cache --exclude out "$ROOT/" "$WORK/repo/"
+# Keep source and Git provenance, but leave credentials, website builds and local caches behind.
+rsync -a --exclude broadcast --exclude cache --exclude out --include .env.example --exclude '.env*' \
+  --exclude '*.env' --exclude '*.key' --exclude '*.pem' --exclude keystore --exclude keystores \
+  --exclude node_modules --exclude dist --exclude test-results --exclude playwright-report \
+  --exclude .vercel --include '/.impeccable/config.json' --exclude '/.impeccable/*' \
+  --exclude __pycache__ "$ROOT/" "$WORK/repo/"
 cd "$WORK/repo"
 mkdir -p config/rehearsal
 "$BIN/forge" build >/dev/null  # compile before forking, to keep the fork young
@@ -73,19 +78,19 @@ case "$BASE_RPC_URL" in http://127.0.0.1:*) ;; *) fail "refusing a non-local RPC
 
 DEPLOYER=${DEPLOYER:-$(account deployer)}
 RECEIVER=$(account receiver)
-USER=$(account user)
+REHEARSAL_USER=$(account user)
 export DEPLOYER
 NONCE=$(cast nonce "$DEPLOYER" --rpc-url "$LOCAL")
 step "Preflight: deployer $DEPLOYER (nonce $NONCE), seed receiver $RECEIVER"
 PREDICTED_VAULT=$(cast compute-address "$DEPLOYER" --nonce $((NONCE + 2)) | awk '{print $NF}')
 PREDICTED_GATEWAY=$(cast compute-address "$DEPLOYER" --nonce $((NONCE + 3)) | awk '{print $NF}')
-python3 scripts/verify_base.py --rpc "$LOCAL" --reads-only --account "$DEPLOYER" --account "$RECEIVER" \
+python3 -m scripts.verify_base --rpc "$LOCAL" --reads-only --account "$DEPLOYER" --account "$RECEIVER" \
   --account "$PREDICTED_VAULT" --account "$PREDICTED_GATEWAY" >"$WORK/logs/preflight.json" ||
   fail "verify_base.py (see $WORK/logs/preflight.json)"
 
 step "Deploy (predicted vault $PREDICTED_VAULT)"
 fund "$DEPLOYER" $((SEED_USD * 2 * 1000000))
-forge_script script/Deploy.s.sol:Deploy "$DEPLOYER"
+forge_script scripts/Deploy.s.sol:Deploy "$DEPLOYER"
 read -r VALUATION CONTROLLER VAULT GATEWAY LENS < <(python3 - <<'EOF'
 import json
 d = json.load(open('broadcast/Deploy.s.sol/8453/run-latest.json'))
@@ -96,18 +101,18 @@ EOF
 export VAULT CONTROLLER GATEWAY
 [ "$(cast to-check-sum-address "$VAULT")" = "$(cast to-check-sum-address "$PREDICTED_VAULT")" ] ||
   fail "vault address differs from the prediction"
-python3 scripts/verify_deployment.py --rpc "$LOCAL" \
+python3 -m scripts.verify_deployment --rpc "$LOCAL" \
   --write-record "$WORK/deployment-record.json" >"$WORK/logs/verify-deployment.json" ||
   fail "verify_deployment.py (see $WORK/logs/verify-deployment.json)"
 
 step "Size the seed, acquire it from the pinned pools and bootstrap"
-python3 scripts/seed_basket.py --usd "$SEED_USD" --vault "$VAULT" \
+python3 -m scripts.seed_basket --usd "$SEED_USD" --vault "$VAULT" \
   --receiver "$RECEIVER" --out config/rehearsal/seed.json --rpc "$LOCAL" --max-feed-age 604800 \
   >"$WORK/logs/seed.json" || fail "seed_basket.py (see $WORK/logs/seed.json)"
 export SEED_FILE=config/rehearsal/seed.json MAX_FEED_AGE=604800 GATEWAY
-forge_script script/AcquireSeed.s.sol:AcquireSeed "$DEPLOYER"
-forge_script script/Bootstrap.s.sol:Bootstrap "$DEPLOYER"
-python3 scripts/verify_deployment.py --rpc "$LOCAL" --bootstrapped \
+forge_script scripts/AcquireSeed.s.sol:AcquireSeed "$DEPLOYER"
+forge_script scripts/Bootstrap.s.sol:Bootstrap "$DEPLOYER"
+python3 -m scripts.verify_deployment --rpc "$LOCAL" --bootstrapped \
   --seed config/rehearsal/seed.json >"$WORK/logs/verify-bootstrap.json" ||
   fail "verify_deployment.py --bootstrapped (see $WORK/logs/verify-bootstrap.json)"
 PRICE=$(cast call "$LENS" 'pricePerShare()(uint256,uint256)' --rpc-url "$LOCAL" | head -1 | awk '{print $1}')
@@ -118,19 +123,19 @@ python3 -c 'import sys; p, usd = int(sys.argv[1]), int(sys.argv[2]); sys.exit(ab
   "$PRICE" "$SEED_USD" || fail "the lens prices a share at $PRICE, not about SEED_USD / 1000"
 
 step "Smoke tests: gateway mint and redeem, in-kind resilient redemption, receipt transfer"
-fund "$USER" 20000000
+fund "$REHEARSAL_USER" 20000000
 DEADLINE=$(($(cast block latest -f timestamp --rpc-url "$LOCAL") + 3600))
-send --from "$USER" "$USDC" 'approve(address,uint256)' "$GATEWAY" 20000000
-send --from "$USER" "$GATEWAY" 'mintWithUSDC(uint256,uint256,address,uint256)' 3000000000000000000 20000000 \
-  "$USER" "$DEADLINE"
-[ "$(cast call "$VAULT" 'balanceOf(address)(uint256)' "$USER" --rpc-url "$LOCAL" | awk '{print $1}')" = \
+send --from "$REHEARSAL_USER" "$USDC" 'approve(address,uint256)' "$GATEWAY" 20000000
+send --from "$REHEARSAL_USER" "$GATEWAY" 'mintWithUSDC(uint256,uint256,address,uint256)' 3000000000000000000 20000000 \
+  "$REHEARSAL_USER" "$DEADLINE"
+[ "$(cast call "$VAULT" 'balanceOf(address)(uint256)' "$REHEARSAL_USER" --rpc-url "$LOCAL" | awk '{print $1}')" = \
   3000000000000000000 ] || fail "gateway mint"
-send --from "$USER" "$VAULT" 'approve(address,uint256)' "$GATEWAY" 1000000000000000000
-send --from "$USER" "$GATEWAY" 'redeemToUSDC(uint256,uint256,address,uint256)' 1000000000000000000 0 "$USER" \
+send --from "$REHEARSAL_USER" "$VAULT" 'approve(address,uint256)' "$GATEWAY" 1000000000000000000
+send --from "$REHEARSAL_USER" "$GATEWAY" 'redeemToUSDC(uint256,uint256,address,uint256)' 1000000000000000000 0 "$REHEARSAL_USER" \
   "$DEADLINE"
-send --from "$USER" "$VAULT" 'redeemBasketWithClaims(uint256,uint256[8],address,uint256)' 1000000000000000000 \
-  '[0,0,0,0,0,0,0,0]' "$USER" "$DEADLINE"
-send --from "$USER" "$VAULT" 'transfer(address,uint256)' "$RECEIVER" 500000000000000000
+send --from "$REHEARSAL_USER" "$VAULT" 'redeemBasketWithClaims(uint256,uint256[8],address,uint256)' 1000000000000000000 \
+  '[0,0,0,0,0,0,0,0]' "$REHEARSAL_USER" "$DEADLINE"
+send --from "$REHEARSAL_USER" "$VAULT" 'transfer(address,uint256)' "$RECEIVER" 500000000000000000
 for i in 0 1 2 3 4 5 6 7; do
   [ "$(cast call "$VAULT" 'reserved(uint256)(uint256)' $i --rpc-url "$LOCAL" | awk '{print $1}')" = 0 ] ||
     fail "a redemption leg was deferred"
@@ -141,7 +146,7 @@ done
 step "Reset status and monitoring"
 [ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = true ] ||
   fail "a fresh deployment should have this quarter's reset due"
-python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
+python3 -m scripts.monitor --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
   --state-file "$WORK/monitor-state.json" >"$WORK/logs/monitor.json" || true
 monitor_ok "$WORK/logs/monitor.json" || fail "monitor.py alert or read failure (see $WORK/logs/monitor.json)"
 grep -q "equal-weight reset" "$WORK/logs/monitor.json" || fail "monitor did not report the due reset"
@@ -153,10 +158,10 @@ step "First reset, with the runbook's Maintain.s.sol:Rebalance"
 # it and leave this quarter's reset due.
 LOG="$WORK/logs/rebalance.log"
 QUARTER=$(cast call "$CONTROLLER" 'currentQuarter()(uint32)' --rpc-url "$LOCAL")
-if EXECUTOR=$USER "$BIN/forge" script script/Maintain.s.sol:Rebalance --rpc-url "$LOCAL" --unlocked --sender "$USER" \
+if EXECUTOR=$REHEARSAL_USER "$BIN/forge" script scripts/Maintain.s.sol:Rebalance --rpc-url "$LOCAL" --unlocked --sender "$REHEARSAL_USER" \
   --broadcast --gas-estimate-multiplier 200 >"$LOG" 2>&1; then
   [ "$(cast call "$CONTROLLER" 'rebalanceDue()(bool)' --rpc-url "$LOCAL")" = false ] || fail "a tranche ran but no cooldown began"
-  python3 scripts/monitor.py --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
+  python3 -m scripts.monitor --controller "$CONTROLLER" --gateway "$GATEWAY" --lens "$LENS" --rpc "$LOCAL" \
     --state-file "$WORK/monitor-state.json" >"$WORK/logs/monitor-after-reset.json" || true
   monitor_ok "$WORK/logs/monitor-after-reset.json" ||
     fail "monitor.py alert or read failure after the reset (see $WORK/logs/monitor-after-reset.json)"

@@ -77,7 +77,7 @@ Updated September 28: the launch organizer chose to deploy now under Beryl, befo
    ```sh
    BASE_RPC_URL=https://mainnet.base.org \
    ANVIL_FORK_FLAGS="--compute-units-per-second 20 --retries 30 --fork-retry-backoff 3000 --timeout 60000" \
-     script/rehearse.sh
+     scripts/rehearse.sh
    ```
 
    It must end with `Rehearsal passed`. Its last step is the first reset with the `Rebalance` script: inside the execution window (a weekday, 15:00–20:00 UTC) the reset runs on the fork; outside it, the valuation must refuse it and change nothing. The fork source must serve recent history: `mainnet.base.org` does when throttled as above, and so may your private endpoint. The rehearsal applies Cobalt's rules by default; set `BASE_UPGRADE=beryl` for the rules mainnet runs before activation. With `DEPLOYER` set to the real deployer, it previews the exact mainnet addresses.
@@ -97,7 +97,7 @@ Updated September 28: the launch organizer chose to deploy now under Beryl, befo
 2. Preflight against live mainnet, with every planned account checked against the stocks' transfer policies:
 
    ```sh
-   python3 scripts/verify_base.py --reads-only --account "$DEPLOYER" --account "$SEED_RECEIVER" \
+   python3 -m scripts.verify_base --reads-only --account "$DEPLOYER" --account "$SEED_RECEIVER" \
      --account "$VAULT_PREDICTED" --account "$GATEWAY_PREDICTED"
    ```
 
@@ -118,7 +118,7 @@ Updated September 28: the launch organizer chose to deploy now under Beryl, befo
 2. Simulate:
 
    ```sh
-   "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --sender "$DEPLOYER"
+   "$BASE_FORGE" script scripts/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --sender "$DEPLOYER"
    ```
 
    Check that the logged `Vault` equals `$VAULT_PREDICTED`. The run must end `SIMULATION COMPLETE`.
@@ -126,7 +126,7 @@ Updated September 28: the launch organizer chose to deploy now under Beryl, befo
 3. Broadcast five transactions: the Valuation, controller, vault and gateway, then the read-only lens. Send nothing else from the deployer until all five are mined:
 
    ```sh
-   "$BASE_FORGE" script script/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
+   "$BASE_FORGE" script scripts/Deploy.s.sol:Deploy --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
      --broadcast --slow --gas-estimate-multiplier 200
    ```
 
@@ -135,7 +135,7 @@ Updated September 28: the launch organizer chose to deploy now under Beryl, befo
 4. Verify on chain and write the deployment record:
 
    ```sh
-   python3 scripts/verify_deployment.py --write-record deployments/base-mainnet.json
+   python3 -m scripts.verify_deployment --write-record deployments/base-mainnet.json
    ```
 
    Expect `"ok": true`, with every contract's `runtime code matches the local build`.
@@ -173,7 +173,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 1. Size an equal-value seed at current prices:
 
    ```sh
-   python3 scripts/seed_basket.py --usd "$SEED_USD" --vault "$VAULT" --receiver "$SEED_RECEIVER"
+   python3 -m scripts.seed_basket --usd "$SEED_USD" --vault "$VAULT" --receiver "$SEED_RECEIVER"
    ```
 
    Review `config/seed.json` and fund the deployer with the printed `usdc_budget_for_acquire_seed`. Every stock needs at least 0.01 tokens, so the seed must be worth at least about $53 at current prices; the script refuses a smaller seed and prints the minimum. Only 1% of the seed stays locked for good.
@@ -181,8 +181,8 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 2. Buy the seed through the vault's pinned pools. Simulate first, then broadcast. Each of the seven purchases is an approval, a swap and an approval reset:
 
    ```sh
-   "$BASE_FORGE" script script/AcquireSeed.s.sol:AcquireSeed --rpc-url "$BASE_RPC_URL" --sender "$DEPLOYER"
-   "$BASE_FORGE" script script/AcquireSeed.s.sol:AcquireSeed --rpc-url "$BASE_RPC_URL" --ledger \
+   "$BASE_FORGE" script scripts/AcquireSeed.s.sol:AcquireSeed --rpc-url "$BASE_RPC_URL" --sender "$DEPLOYER"
+   "$BASE_FORGE" script scripts/AcquireSeed.s.sol:AcquireSeed --rpc-url "$BASE_RPC_URL" --ledger \
      --sender "$DEPLOYER" --broadcast --slow
    ```
 
@@ -191,10 +191,10 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 3. Bootstrap with seven approvals and one `bootstrap` call. It re-verifies the linkage first:
 
    ```sh
-   "$BASE_FORGE" script script/Bootstrap.s.sol:Bootstrap --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
+   "$BASE_FORGE" script scripts/Bootstrap.s.sol:Bootstrap --rpc-url "$BASE_RPC_URL" --ledger --sender "$DEPLOYER" \
      --broadcast --slow
    BOOTSTRAP_BLOCK=$(python3 -c 'import json; d=json.load(open("broadcast/Bootstrap.s.sol/8453/run-latest.json")); print(max(int(r["blockNumber"],16) for r in d["receipts"]))')
-   python3 scripts/verify_deployment.py --bootstrapped --min-block "$BOOTSTRAP_BLOCK"
+   python3 -m scripts.verify_deployment --bootstrapped --min-block "$BOOTSTRAP_BLOCK"
    ```
 
    The verifier waits up to 30 seconds for the read endpoint to reach the bootstrap receipt block. During the initial launch a lagging read endpoint returned `NotInitialized()` just after the successful bootstrap; the retry passed all 84 checks. If verification fails, inspect the transaction receipts before retrying a broadcast. A read failure does not mean the transaction failed.
@@ -221,7 +221,7 @@ Run this during US market hours (13:30–20:00 UTC), when feeds are fresh and po
 5. **First reset.** This quarter's reset is due as soon as the vault exists. On a weekday between 15:00 and 20:00 UTC:
 
    ```sh
-   EXECUTOR=$ME "$BASE_FORGE" script script/Maintain.s.sol:Rebalance --rpc-url "$BASE_RPC_URL" --ledger \
+   EXECUTOR=$ME "$BASE_FORGE" script scripts/Maintain.s.sol:Rebalance --rpc-url "$BASE_RPC_URL" --ledger \
      --sender "$ME" --broadcast --gas-estimate-multiplier 200
    ```
 
@@ -243,6 +243,11 @@ Once the smoke tests pass and the monitor is running, publish:
 Each calendar quarter, anyone may run the reset, on weekdays between 15:00 and 20:00 UTC, in tranches at least 30 minutes apart. Each tranche trades at most about $10,000 per stock and the script says whether the quarter completed or when the next tranche may start: run it again until it prints `Reset complete`. A small vault completes in one tranche; in a volatile quarter a $1M vault takes a handful. Once the vault is large enough, the reward (5 bp of each tranche's traded value, up to $25) should attract others to do it; until then, run the `Rebalance` script above yourself early in the quarter. The monitor reports a reset in progress, alerts when a quarter's reset is still incomplete a week after it opens, and as critical with 21 days or fewer left. If a quarter ends first, nothing breaks: the next quarter's tranches continue it, and the basket keeps its quantities meanwhile.
 
 ## Monitoring
+
+Run Python commands from the repository root with `python3 -m scripts.monitor`.
+When upgrading an existing monitor checkout, also reinstall its service template
+and run `systemctl daemon-reload` (or `systemctl --user daemon-reload` for the user
+service): older units invoke the Python file directly.
 
 `scripts/monitor.py` runs every 15 minutes from a systemd timer on an always-on Linux server. It:
 - checks whether this quarter's reset has completed, is in progress, or has yet to open;
@@ -276,7 +281,7 @@ sudo systemctl start m7-monitor.service && journalctl -u m7-monitor -n 50
 For the heartbeat, create a check (for example on healthchecks.io) that expects a ping every 15 minutes with 30 minutes' grace, and put its URL in `HEARTBEAT_URL`. Without systemd, use cron:
 
 ```sh
-*/15 * * * * cd /opt/m7 && set -a && . /etc/m7/monitor.env && python3 scripts/monitor.py >> /var/log/m7-monitor.log 2>&1
+*/15 * * * * cd /opt/m7 && set -a && . /etc/m7/monitor.env && python3 -m scripts.monitor >> /var/log/m7-monitor.log 2>&1
 ```
 
 **User-service alternative.** When the SSH user already has `Linger=yes` (`loginctl show-user "$USER" -p Linger`), the monitor can run across logouts without a system service. Put the release source in `~/.local/share/m7`, a verified `cast` executable or symlink in its `bin/` directory, and install `ops/m7-monitor-user.service` as `~/.config/systemd/user/m7-monitor.service`. Copy the existing timer alongside it. Stage the monitor environment at `~/.config/m7/monitor.env` with mode 600. After deployment verification, fill in the actual addresses, configure alert delivery, rename it to `deployed.env`, then run:

@@ -63,7 +63,7 @@ Registry pauses and sequencer outages are not replayed. [Feed behavior](https://
 - **Price per share** (`testBaseNativeLensPricesShares`). `M7Lens` values a seed bought for 700 USDC at **$0.7002** per share from the live feeds, while its stalest price was 18 hours old.
 - **Policies and exits** (`testBaseNativeTransferGasAndResilientRedemption`). M7 transfers against the real policy registry cost about 52k gas to a new holder and 28k to an existing one. These are measured inside one test transaction; a standalone transfer also pays cold account access. `redeemBasketWithClaims` delivered every leg, with no claims.
 
-`script/rehearse.sh` also ran the mainnet runbook end to end on a local base-anvil fork under both rule sets:
+`scripts/rehearse.sh` also ran the mainnet runbook end to end on a local base-anvil fork under both rule sets:
 - deploy, and 63 deployment checks with bytecode matching the build;
 - an equal-dollar seed worth 1,000 USDC at oracle prices, bought for 999.74 USDC;
 - bootstrap, and 84 post-bootstrap checks;
@@ -80,8 +80,8 @@ An earlier, cap-weighted design's round trip had passed at block 51,830,602 with
 With Python 3.9+ and Foundry `cast` installed:
 
 ```sh
-python3 scripts/verify_base.py
-python3 scripts/verify_base.py --rpc "$BASE_RPC_URL" --reads-only --account 0xYOUR_VAULT --account 0xYOUR_GATEWAY
+python3 -m scripts.verify_base
+python3 -m scripts.verify_base --rpc "$BASE_RPC_URL" --reads-only --account 0xYOUR_VAULT --account 0xYOUR_GATEWAY
 python3 -m unittest discover -s test -p 'test_*.py'
 ```
 
@@ -89,7 +89,7 @@ The second command requires real addresses. Every onchain read is pinned to one 
 
 Before seeding, complete the gates in [the deployment runbook](DEPLOYMENT.md):
 
-1. Re-run the native tests and `script/rehearse.sh` on a post-Cobalt block, then verify the deployment with `scripts/verify_deployment.py` before funding it.
+1. Re-run the native tests and `scripts/rehearse.sh` on a post-Cobalt block, then verify the deployment with `scripts/verify_deployment.py` before funding it.
 2. Establish the permitted wrapper distribution and issuer eligibility. The owner has decided to launch without an independent security review.
 3. Run `scripts/monitor.py` on an always-on server and test its alerting. Public CLI reads alone are not a continuously running monitor.
 4. Re-run current source verification and read checks immediately before any deployment or bootstrap. Passing historical quotes does not reserve liquidity.

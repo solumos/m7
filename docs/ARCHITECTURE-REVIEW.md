@@ -67,7 +67,7 @@ Do not merely add `maxTradeSize` under caller control. A caller could repeatedly
 
 ## D-03 — Permissionless maintenance is not economically assured maintenance
 
-**Priority: high.** [Maintain.s.sol](../script/Maintain.s.sol) lets anyone submit one tranche. [The runbook](DEPLOYMENT.md#phase-4-the-quarterly-reset) explicitly relies on the operator while rewards are too small. [The monitor](../scripts/monitor.py) observes and alerts; it does not execute resets.
+**Priority: high.** [Maintain.s.sol](../scripts/Maintain.s.sol) lets anyone submit one tranche. [The runbook](DEPLOYMENT.md#phase-4-the-quarterly-reset) explicitly relies on the operator while rewards are too small. [The monitor](../scripts/monitor.py) observes and alerts; it does not execute resets.
 
 At a $125 NAV and 10% one-way turnover, the nominal 5 bp reward is approximately **$0.00625**, before rounding or other execution details. That is not a credible unconditional promise that an unrelated operator will pay transaction and monitoring costs. At larger sizes, costs, reverts, competing callers, and the $25 reward cap still matter. This is an incentive gap, not a privileged caller restriction.
 

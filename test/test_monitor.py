@@ -1,9 +1,6 @@
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from monitor import REPEAT_CRITICAL_SECONDS, WAD, decode_value, plan_notifications, reset_status, vault_state
+from scripts.monitor import REPEAT_CRITICAL_SECONDS, WAD, decode_value, plan_notifications, reset_status, vault_state
 
 DUE = {'level': 'info', 'message': "This quarter's equal-weight reset is due."}
 LATE = {'level': 'action', 'message': "This quarter's equal-weight reset has not run; anyone can trigger it."}

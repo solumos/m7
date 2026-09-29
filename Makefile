@@ -17,7 +17,7 @@ ui-check:
 	npm --prefix ui run build
 
 integration:
-	python3 scripts/verify_base.py
+	python3 -m scripts.verify_base
 
 # Native B20 fork tests; needs Base's Foundry build (docs/DEPLOYMENT.md). FOUNDRY_BASE=beryl before Cobalt.
 native:
@@ -25,4 +25,4 @@ native:
 
 # Rehearse the mainnet runbook on a local base-anvil fork.
 rehearse:
-	script/rehearse.sh
+	scripts/rehearse.sh

@@ -2,7 +2,7 @@ import { createPublicClient, fallback, http, erc20Abi, parseAbi } from 'viem';
 import { base } from 'viem/chains';
 import deployment from '../../deployments/base-mainnet.json' with { type: 'json' };
 import config from '../../config/base.json' with { type: 'json' };
-import abis from './abi.json' with { type: 'json' };
+import abis from './abi.js';
 import { assertFresh, bound, sizeUSDC } from './math.js';
 
 export { base, erc20Abi, abis };
@@ -12,9 +12,8 @@ export const stocks = config.stocks.map((s, i) => ({
   symbol: s.symbol, address: s.address.toLowerCase(), decimals: s.decimals, spacing: s.tick_spacing,
   logo: `companies/${s.symbol}.png`,
   name: ['Apple', 'Amazon', 'Alphabet', 'Meta', 'Microsoft', 'NVIDIA', 'Tesla'][i],
-  color: ['#d5ff5e', '#74efc4', '#66e5f5', '#8298ff', '#bd9cff', '#f787d5', '#ffc484'][i],
 }));
-export const assets = [...stocks, { symbol: 'USDC', address: usdc, decimals: 6, name: 'Cash', color: '#8992a6' }];
+export const assets = [...stocks, { symbol: 'USDC', address: usdc, decimals: 6, name: 'Cash' }];
 export const explorer = 'https://basescan.org';
 export const client = createPublicClient({
   chain: base,

@@ -13,6 +13,11 @@ changes. Wallet-flow changes also need the mocked browser checks documented in
 the website README. Live integration tests require an explicit opt-in and a
 Base-compatible Foundry build; ordinary tests do not broadcast transactions.
 
+Operational commands share `scripts/`: use `forge script scripts/Name.s.sol:Name`
+for Solidity and `python3 -m scripts.name` for Python, from the repository root.
+Python tools use only the standard library plus Foundry's `cast`; shared RPC and
+encoding helpers belong in `scripts/common.py`.
+
 Keep changes focused. Include a regression test for changes to accounting,
 execution limits, wallet behavior, or other nontrivial logic. Explain the
 resulting behavior, validation, and relevant limitations in the pull request.

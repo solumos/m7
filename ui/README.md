@@ -85,8 +85,8 @@ execution window and price/turnover checks remain authoritative.
   receipts are not reported as completed trades. A timed-out transaction can
   still confirm: inspect its linked explorer page before resubmitting.
 
-`src/abi.json` contains only the used functions and errors from the compiled
-contracts. The ABI test detects drift when Foundry artifacts are available.
+`src/abi.js` contains readable signatures for only the functions and errors the
+site uses. The ABI test detects drift when Foundry artifacts are available.
 Deployment addresses and stock routes come from the repository's deployment and
 Base configuration records. No contract code changes are needed for this site.
 

@@ -13,6 +13,6 @@ WorkingDirectory=%h/.local/share/m7
 EnvironmentFile=%h/.config/m7/deployed.env
 Environment=PATH=%h/.local/share/m7/bin:/usr/local/bin:/usr/bin:/bin
 Environment=STATE_FILE=%h/.local/state/m7-monitor/state.json
-ExecStart=/usr/bin/python3 scripts/monitor.py
+ExecStart=/usr/bin/python3 -m scripts.monitor
 TimeoutStartSec=600
 NoNewPrivileges=true

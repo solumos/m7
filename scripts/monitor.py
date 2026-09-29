@@ -16,11 +16,10 @@ import os
 from pathlib import Path
 import sys
 import time
-import urllib.request
 
-from verify_base import RPC, SYMBOLS, address, verify
+from scripts.common import ROOT, RPC, SYMBOLS, address, request
+from scripts.verify_base import verify
 
-ROOT = Path(__file__).resolve().parents[1]
 REPEAT_CRITICAL_SECONDS = 6 * 3600
 PREFLIGHT_INTERVAL_SECONDS = 3600
 # critical: a human must look now; action: an operator step is due; info: an expected state.
@@ -148,14 +147,6 @@ def vault_state(rpc, controller, vault, lens, state):
         alerts.append({'level': 'action', 'message': 'Deferred claims are outstanding for %s: the vault could not '
                        'deliver them to redeemers.' % ', '.join(owed)})
     return alerts, report
-
-
-def request(url, payload=None):
-    data = None if payload is None else json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json',
-                                                           'User-Agent': 'm7-monitor/0.1'})
-    with urllib.request.urlopen(req, timeout=30) as response:
-        response.read()
 
 
 def collect(args, state, now):

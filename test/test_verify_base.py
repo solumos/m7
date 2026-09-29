@@ -1,10 +1,6 @@
-import importlib.util
-from pathlib import Path
 import unittest
 
-spec = importlib.util.spec_from_file_location('verify_base', Path(__file__).parents[1] / 'scripts/verify_base.py')
-preflight = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(preflight)
+from scripts import verify_base as preflight
 
 
 class RebalanceOracleRuleTests(unittest.TestCase):

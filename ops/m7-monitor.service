@@ -16,7 +16,7 @@ EnvironmentFile=/etc/m7/monitor.env
 # The preflight uses Foundry's cast for selectors and Keccak hashes.
 Environment=PATH=/home/m7/.foundry/bin:/usr/local/bin:/usr/bin:/bin
 StateDirectory=m7-monitor
-ExecStart=/usr/bin/python3 scripts/monitor.py
+ExecStart=/usr/bin/python3 -m scripts.monitor
 TimeoutStartSec=600
 NoNewPrivileges=true
 PrivateTmp=true
