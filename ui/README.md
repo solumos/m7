@@ -124,6 +124,14 @@ vercel deploy --prebuilt --prod
 The Vercel build installs the pinned UI dependencies and produces static files;
 no runtime environment variables or server functions are needed.
 
+Social previews use static Open Graph and X/Twitter tags in `index.html`, so
+crawlers do not need JavaScript. `public/social-card-v1.png` is the 1200×630
+share image; `social-card.svg` is its editable source and uses the bundled
+Chakra Petch Semibold font. Export with that font installed or outlined.
+The PNG is committed, so deployment needs no image-generation dependencies.
+When replacing it, version the filename and update both image URLs in the HTML
+to avoid reusing a cached image. `public/robots.txt` allows crawler access.
+
 The default read transports are PublicNode and Base's public RPC. They may be
 rate-limited or unavailable; failures are shown in the UI. For higher traffic,
 change the public read endpoints in `src/chain.js`. Never put a private API secret
